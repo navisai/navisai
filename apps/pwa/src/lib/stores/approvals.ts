@@ -34,7 +34,7 @@ function createApprovalsStore() {
     }
   }
 
-  const resolveApproval = async (id: string, action: 'approve' | 'deny') => {
+  const resolveApproval = async (id: string, action: 'approve' | 'reject') => {
     try {
       update(state => ({
         ...state,
@@ -62,7 +62,7 @@ function createApprovalsStore() {
   }
 
   const approve = (id: string) => resolveApproval(id, 'approve')
-  const deny = (id: string) => resolveApproval(id, 'deny')
+  const reject = (id: string) => resolveApproval(id, 'reject')
 
   const addApproval = (approval: Approval) => {
     update(state => ({
@@ -93,7 +93,7 @@ function createApprovalsStore() {
     subscribe,
     loadPendingApprovals,
     approve,
-    deny,
+    reject,
     resolveApproval,
     addApproval,
     removeApproval,

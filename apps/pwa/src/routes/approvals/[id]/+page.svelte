@@ -20,9 +20,9 @@
 	async function handleDeny() {
 		if (!approval) return
 		try {
-			await approvalsStore.deny(approval.id)
+			await approvalsStore.reject(approval.id)
 		} catch (error) {
-			console.error('Failed to deny:', error)
+			console.error('Failed to reject:', error)
 		}
 	}
 </script>

@@ -18,6 +18,7 @@ export const NAVIS_PATHS = /** @type {const} */ ({
   pairing: {
     request: '/pairing/request',
     start: '/pairing/start',
+    qr: '/pairing/qr',
   },
   projects: {
     list: '/projects',
@@ -25,8 +26,18 @@ export const NAVIS_PATHS = /** @type {const} */ ({
   },
   sessions: '/sessions',
   approvals: {
+    list: '/approvals',
+    pending: '/approvals/pending',
     approve: (id) => `/approvals/${encodeURIComponent(id)}/approve`,
     reject: (id) => `/approvals/${encodeURIComponent(id)}/reject`,
+  },
+  devices: {
+    list: '/devices',
+    revoke: (id) => `/devices/${encodeURIComponent(id)}/revoke`,
+  },
+  discovery: {
+    scan: '/discovery/scan',
+    index: '/discovery/index',
   },
 })
 
@@ -39,4 +50,3 @@ export const NAVIS_WS_EVENTS = /** @type {const} */ ([
   'approval.request',
   'approval.updated',
 ])
-

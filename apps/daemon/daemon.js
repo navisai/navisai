@@ -7,15 +7,15 @@
 
 import Fastify from 'fastify'
 import { readFile } from 'node:fs/promises'
-import { createServer } from 'node:https'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 // Local config for now
 const DEFAULT_CONFIG = {
   daemon: {
     port: 47621,
-    host: '0.0.0.0',
+    host: '127.0.0.1',
     ssl: {
       selfSigned: true,
       certPath: null,
@@ -52,12 +52,11 @@ import { SessionService } from './services/session.js'
 import { ApprovalService } from './services/approval.js'
 import { PairingService } from './services/pairing.js'
 
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
 export class NavisDaemon {
   constructor() {
-    this.fastify = Fastify({
-      logger: { level: 'info' }
-    })
-    this.httpsServer = null
+    this.fastify = null
     this.sslManager = new SSLManager()
     this.wsManager = null
     this.config = {
@@ -100,8 +99,7 @@ export class NavisDaemon {
         DEFAULT_CONFIG.daemon.port = parseInt(process.env.NAVIS_PORT)
       }
 
-      // Try to find the best available port
-      const port = await this.findAvailablePort()
+      const port = this.config.get('daemon.port')
       const host = this.config.get('daemon.host')
 
       // Update config with the chosen port
@@ -111,8 +109,10 @@ export class NavisDaemon {
       await this.sslManager.ensureCertificates()
       const sslOptions = await this.sslManager.getSSLOptions()
 
-      // Create HTTPS server
-      this.httpsServer = createServer(sslOptions, this.fastify.server)
+      this.fastify = Fastify({
+        logger: { level: 'info' },
+        https: sslOptions
+      })
 
       // Initialize services
       await this.initializeServices()
@@ -135,68 +135,13 @@ export class NavisDaemon {
       this.isRunning = true
 
       console.log(`\n✅ Navis daemon is running!`)
-
-      if (port === 443) {
-        console.log(`🌐 Seamless access: https://navis.local`)
-        console.log(`📱 Onboarding: https://navis.local/welcome`)
-        console.log(`📊 API: https://navis.local/api/status`)
-      } else {
-        console.log(`🌐 Access at: https://navis.local:${port}`)
-        console.log(`📱 Onboarding: https://navis.local:${port}/welcome`)
-        console.log(`📊 API: https://navis.local:${port}/api/status`)
-        console.log(`\n💡 For portless access, run with sudo: sudo navisai up`)
-      }
+      console.log(`📱 Onboarding: https://navis.local/welcome`)
+      console.log(`📊 Status: https://navis.local/status`)
 
     } catch (error) {
-      if (error.code === 'EACCES') {
-        console.error('\n❌ Permission denied binding to port 443')
-        console.error('   To run on port 443 for seamless https://navis.local access:')
-        console.error('   sudo navisai up')
-        console.error('\n   Or run without sudo for ported access:')
-        console.error('   navisai up\n')
-        process.exit(1)
-      }
       console.error('\n❌ Failed to start daemon:', error.message)
       throw error
     }
-  }
-
-  async findAvailablePort() {
-    // If port is explicitly set via environment, respect it
-    if (process.env.NAVIS_PORT) {
-      return parseInt(process.env.NAVIS_PORT)
-    }
-
-    // Use default port 47621 as specified in IPC_TRANSPORT.md
-    // Reference: docs/IPC_TRANSPORT.md - "Default port: 47621 (example; configurable)"
-    const ports = [47621, 47622, 47623, 8443]
-
-    for (const port of ports) {
-      try {
-        // Test if we can bind to this port
-        const net = await import('node:net')
-        const server = net.default.createServer()
-
-        await new Promise((resolve, reject) => {
-          server.listen(port, '0.0.0.0', () => {
-            server.close(() => resolve())
-          })
-          server.on('error', reject)
-        })
-
-        // If we get here, we can bind to the port
-        return port
-      } catch (error) {
-        // Skip ports we can't bind to
-        if (error.code === 'EACCES' || error.code === 'EADDRINUSE') {
-          continue
-        }
-
-      }
-    }
-
-    // If all ports fail, return default
-    return 47621
   }
 
   async initializeServices() {
@@ -221,44 +166,37 @@ export class NavisDaemon {
   }
 
   async setupRoutes() {
-    const apiPrefix = '/api'
-
     // Add authentication middleware
     const authMiddleware = createAuthMiddleware(this.dbManager)
     this.fastify.addHook('preHandler', authMiddleware)
 
     // Public endpoints (no auth required)
     this.fastify.get('/welcome', this.getWelcomeHandler.bind(this))
-    this.fastify.get(`${apiPrefix}/status`, this.getStatusHandler.bind(this))
-    this.fastify.post(`${apiPrefix}/pairing/request`, this.pairingService.handleRequest.bind(this.pairingService))
+    this.fastify.get('/status', this.getStatusHandler.bind(this))
+    this.fastify.post('/pairing/request', this.pairingService.handleRequest.bind(this.pairingService))
 
     // Auth-required endpoints (will add middleware)
-    this.fastify.get(`${apiPrefix}/projects`, this.getProjectsHandler.bind(this))
-    this.fastify.get(`${apiPrefix}/projects/:id`, this.getProjectHandler.bind(this))
-    this.fastify.get(`${apiPrefix}/sessions`, this.getSessionsHandler.bind(this))
-    this.fastify.get(`${apiPrefix}/approvals`, this.getApprovalsHandler.bind(this))
-    this.fastify.post(`${apiPrefix}/approvals/:id/approve`, this.approveHandler.bind(this))
-    this.fastify.post(`${apiPrefix}/approvals/:id/reject`, this.rejectHandler.bind(this))
+    this.fastify.get('/projects', this.getProjectsHandler.bind(this))
+    this.fastify.get('/projects/:id', this.getProjectHandler.bind(this))
+    this.fastify.get('/sessions', this.getSessionsHandler.bind(this))
+    this.fastify.get('/approvals', this.getApprovalsHandler.bind(this))
+    this.fastify.get('/approvals/pending', this.getPendingApprovalsHandler.bind(this))
+    this.fastify.post('/approvals/:id/approve', this.approveHandler.bind(this))
+    this.fastify.post('/approvals/:id/reject', this.rejectHandler.bind(this))
 
     // Device management
-    this.fastify.get(`${apiPrefix}/devices`, this.getDevicesHandler.bind(this))
-    this.fastify.post(`${apiPrefix}/devices/:id/revoke`, this.revokeDeviceHandler.bind(this))
+    this.fastify.get('/devices', this.getDevicesHandler.bind(this))
+    this.fastify.post('/devices/:id/revoke', this.revokeDeviceHandler.bind(this))
 
     // Discovery endpoints
-    this.fastify.post(`${apiPrefix}/discovery/scan`, this.scanHandler.bind(this))
-    this.fastify.post(`${apiPrefix}/discovery/index`, this.indexHandler.bind(this))
+    this.fastify.post('/discovery/scan', this.scanHandler.bind(this))
+    this.fastify.post('/discovery/index', this.indexHandler.bind(this))
 
     // Logs endpoint
-    this.fastify.get(`${apiPrefix}/logs`, this.getLogsHandler.bind(this))
+    this.fastify.get('/logs', this.getLogsHandler.bind(this))
 
     // Pairing QR endpoint
     this.fastify.get('/pairing/qr', this.getPairingQRHandler.bind(this))
-
-    // Serve PWA (static files)
-    this.fastify.register(require('@fastify/static'), {
-      root: join(__dirname, '..', 'pwa', 'build'),
-      prefix: '/'
-    })
   }
 
   async setupMDNS() {
@@ -294,124 +232,50 @@ export class NavisDaemon {
     <title>NavisAI - Welcome</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        navis: {
-                            50: '#f0f9ff',
-                            500: '#3b82f6',
-                            600: '#2563eb',
-                            900: '#1e3a8a'
-                        }
-                    }
-                }
-            }
-        }
-    </script>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #f8fafc; margin: 0; }
+      .container { max-width: 880px; margin: 0 auto; padding: 32px 16px; }
+      .card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 10px rgba(15,23,42,0.06); border: 1px solid #e2e8f0; }
+      .title { font-size: 28px; font-weight: 700; color: #0f172a; margin: 0 0 6px; }
+      .muted { color: #475569; margin: 0 0 18px; }
+      .row { display: grid; grid-template-columns: 1fr; gap: 16px; }
+      @media (min-width: 768px) { .row { grid-template-columns: 1fr 1fr; } }
+      .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #ecfeff; color: #0f766e; font-weight: 600; font-size: 12px; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+      img { max-width: 100%; height: auto; border-radius: 10px; }
+      a { color: #0ea5e9; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .subcard { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; }
+    </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <div class="container mx-auto px-4 py-8 max-w-4xl">
-        <!-- Header -->
-        <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-navis-900 mb-2">
-                🧭 NavisAI
-            </h1>
-            <p class="text-lg text-gray-600">Local-first Developer Control Plane</p>
+<body>
+    <div class="container">
+      <div class="card">
+        <div class="badge">Onboarding</div>
+        <h1 class="title">NavisAI is running</h1>
+        <p class="muted">Open this page on your phone to pair, or scan the QR code.</p>
+
+        <div class="row">
+          <div class="subcard">
+            <h2 style="margin:0 0 8px; font-size:16px;">Scan QR</h2>
+            ${pairingData ? `<img src="/pairing/qr" alt="Pairing QR Code" />` : `<p class="muted">Generating...</p>`}
+            ${pairingData ? `<p class="muted" style="margin-top:10px; font-size:12px;">Code: <span class="mono">${pairingData.id.toUpperCase()}</span></p>` : ``}
+          </div>
+          <div class="subcard">
+            <h2 style="margin:0 0 8px; font-size:16px;">Open on phone</h2>
+            <p class="muted" style="margin-bottom:10px;">Visit:</p>
+            <div class="mono"><a href="https://navis.local/welcome">https://navis.local/welcome</a></div>
+            <p class="muted" style="margin-top:10px; font-size:12px;">If prompted, accept the local certificate.</p>
+          </div>
         </div>
-
-        <!-- Status Card -->
-        <div class="bg-green-50 border border-green-200 rounded-lg p-6 mb-8">
-            <h2 class="text-xl font-semibold text-green-800 mb-2">
-                ✅ Navis is running locally
-            </h2>
-            <p class="text-green-700">
-                Your daemon is active and ready to pair with devices.
-                All data stays on your machine - no cloud dependencies.
-            </p>
-        </div>
-
-        <!-- How Navis Works -->
-        <div class="bg-white rounded-lg shadow-sm p-6 mb-8">
-            <h2 class="text-2xl font-bold text-navis-900 mb-4">How Navis Works</h2>
-            <div class="grid md:grid-cols-3 gap-4 text-center">
-                <div class="p-4">
-                    <div class="text-3xl mb-2">💻</div>
-                    <h3 class="font-semibold mb-1">Your Laptop</h3>
-                    <p class="text-sm text-gray-600">Runs the Navis daemon</p>
-                </div>
-                <div class="p-4">
-                    <div class="text-3xl mb-2">📱</div>
-                    <h3 class="font-semibold mb-1">Your Phone</h3>
-                    <p class="text-sm text-gray-600">Connects via PWA</p>
-                </div>
-                <div class="p-4">
-                    <div class="text-3xl mb-2">🔗</div>
-                    <h3 class="font-semibold mb-1">Navis Daemon</h3>
-                    <p class="text-sm text-gray-600">Secure local bridge</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Pairing Section -->
-        <div class="bg-white rounded-lg shadow-sm p-6 mb-8">
-            <h2 class="text-2xl font-bold text-navis-900 mb-4">Connect Your Device</h2>
-
-            <div class="grid md:grid-cols-2 gap-6">
-                <!-- QR Code Option -->
-                <div class="text-center p-4 border-2 border-gray-200 rounded-lg hover:border-navis-500 transition-colors">
-                    <div class="text-2xl mb-2">📷</div>
-                    <h3 class="font-semibold mb-2">Scan QR Code</h3>
-                    ${pairingData ? `
-                        <div class="inline-block p-4 bg-white border rounded">
-                            <img src="/pairing/qr" alt="Pairing QR Code" class="w-48 h-48" />
-                        </div>
-                        <p class="text-sm text-gray-600 mt-2">
-                            Pairing code: <code class="bg-gray-100 px-2 py-1 rounded">${pairingData.id.toUpperCase()}</code>
-                        </p>
-                    ` : `
-                        <p class="text-sm text-gray-600">Generating pairing code...</p>
-                    `}
-                </div>
-
-                <!-- Direct URL Option -->
-                <div class="text-center p-4 border-2 border-gray-200 rounded-lg hover:border-navis-500 transition-colors">
-                    <div class="text-2xl mb-2">🌐</div>
-                    <h3 class="font-semibold mb-2">Direct Access</h3>
-                    <p class="text-sm text-gray-600 mb-4">
-                        On your phone, visit:
-                    </p>
-                    <a href="https://navis.local" class="text-navis-600 hover:text-navis-800 font-mono text-sm break-all">
-                        https://navis.local
-                    </a>
-                    <p class="text-xs text-gray-500 mt-2">
-                        Accept the security certificate when prompted
-                    </p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Local Discovery Status -->
-        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div class="flex items-center justify-between">
-                <div>
-                    <h3 class="font-semibold text-blue-800">Discovery Active</h3>
-                    <p class="text-sm text-blue-700">mDNS and BLE signals are broadcasting</p>
-                </div>
-                <div class="animate-pulse">
-                    <span class="inline-block w-3 h-3 bg-blue-500 rounded-full"></span>
-                </div>
-            </div>
-        </div>
+      </div>
     </div>
 
     <script>
         // Auto-refresh QR code and pairing status
         setInterval(async () => {
             try {
-                const response = await fetch('/api/status')
+                const response = await fetch('/status')
                 const status = await response.json()
 
                 // Update UI based on pairing status
@@ -470,6 +334,17 @@ export class NavisDaemon {
       return { approvals: [] }
     }
     return await this.approvalService.listApprovals()
+  }
+
+  async getPendingApprovalsHandler(request, reply) {
+    // TODO: Add auth middleware
+    if (!this.approvalService) {
+      return { approvals: [] }
+    }
+    const result = await this.approvalService.listApprovals()
+    return {
+      approvals: (result.approvals || []).filter(a => a.status === 'pending')
+    }
   }
 
   async approveHandler(request, reply) {
@@ -569,9 +444,7 @@ export class NavisDaemon {
       await this.wsManager.close()
     }
 
-    if (this.httpsServer) {
-      this.httpsServer.close()
-    }
+    if (this.fastify) await this.fastify.close()
 
     this.isRunning = false
     console.log('✅ Daemon stopped')

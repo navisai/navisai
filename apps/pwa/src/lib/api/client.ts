@@ -1,3 +1,5 @@
+import { NAVIS_PATHS } from '@navisai/api-contracts'
+
 /**
  * NavisAI API Client
  * Handles communication with the Navis daemon
@@ -5,7 +7,7 @@
 
 // API base URLs - Use navis.local on standard HTTPS port (443)
 const API_BASE = 'https://navis.local'
-const WS_URL = 'wss://navis.local/ws'
+const WS_URL = `wss://navis.local${NAVIS_PATHS.ws}`
 
 export interface Project {
   id: string
@@ -73,20 +75,20 @@ class ApiClient {
 
   // HTTP API methods
   async getStatus(): Promise<any> {
-    const response = await fetch(`${API_BASE}/status`)
+    const response = await fetch(`${API_BASE}${NAVIS_PATHS.status}`)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     return response.json()
   }
 
   async getProjects(): Promise<Project[]> {
-    const response = await fetch(`${API_BASE}/api/projects`)
+    const response = await fetch(`${API_BASE}${NAVIS_PATHS.projects.list}`)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const data = await response.json()
     return data.projects || []
   }
 
   async getProject(id: string): Promise<Project> {
-    const response = await fetch(`${API_BASE}/api/projects/${id}`)
+    const response = await fetch(`${API_BASE}${NAVIS_PATHS.projects.byId(id)}`)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     return response.json()
   }
@@ -100,7 +102,7 @@ class ApiClient {
     count: number
     scannedPath: string
   }> {
-    const response = await fetch(`${API_BASE}/api/discovery/scan`, {
+    const response = await fetch(`${API_BASE}${NAVIS_PATHS.discovery.scan}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path, options }),
@@ -113,15 +115,7 @@ class ApiClient {
   }
 
   async getProjectAnalysis(path: string, refresh = false): Promise<Project> {
-    const encodedPath = encodeURIComponent(path)
-    const response = await fetch(
-      `${API_BASE}/api/discovery/project/${encodedPath}?refresh=${refresh}`
-    )
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || `HTTP ${response.status}`)
-    }
-    return response.json()
+    throw new Error('Not implemented')
   }
 
   async indexPaths(paths: string[]): Promise<{
@@ -135,7 +129,7 @@ class ApiClient {
     discovered: number
     total: number
   }> {
-    const response = await fetch(`${API_BASE}/api/discovery/index`, {
+    const response = await fetch(`${API_BASE}${NAVIS_PATHS.discovery.index}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paths }),
@@ -148,22 +142,22 @@ class ApiClient {
   }
 
   async getPendingApprovals(): Promise<Approval[]> {
-    const response = await fetch(`${API_BASE}/api/approvals/pending`)
+    const response = await fetch(`${API_BASE}${NAVIS_PATHS.approvals.pending}`)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const data = await response.json()
     return data.approvals || []
   }
 
-  async resolveApproval(id: string, action: 'approve' | 'deny'): Promise<Approval> {
-    const response = await fetch(`${API_BASE}/api/approvals/${id}/${action}`, {
-      method: 'POST',
-    })
+  async resolveApproval(id: string, action: 'approve' | 'reject'): Promise<Approval> {
+    const path =
+      action === 'approve' ? NAVIS_PATHS.approvals.approve(id) : NAVIS_PATHS.approvals.reject(id)
+    const response = await fetch(`${API_BASE}${path}`, { method: 'POST' })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     return response.json()
   }
 
   async getDevices(): Promise<Device[]> {
-    const response = await fetch(`${API_BASE}/api/devices`)
+    const response = await fetch(`${API_BASE}${NAVIS_PATHS.devices.list}`)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const data = await response.json()
     return data.devices || []

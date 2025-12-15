@@ -3,7 +3,6 @@
  * Drizzle ORM with SQLite support (optional native driver)
  */
 
-import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { drizzle as drizzleLibsql } from 'drizzle-orm/libsql'
 import { createClient } from '@libsql/client'
 import { existsSync, mkdirSync } from 'node:fs'
@@ -32,6 +31,7 @@ class DatabaseManager {
 
       // Try to use native SQLite driver first
       try {
+        const { drizzle } = await import('drizzle-orm/better-sqlite3')
         const BetterSqlite3 = await import('better-sqlite3').then(m => m.default)
         this.nativeDB = new BetterSqlite3(this.dbPath)
         this.db = drizzle(this.nativeDB, { schema })

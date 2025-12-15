@@ -113,8 +113,8 @@ export function createAuthMiddleware(dbManager) {
     // Skip auth for public endpoints
     const publicPaths = [
       '/welcome',
-      '/api/status',
-      '/api/pairing/request',
+      '/status',
+      '/pairing/request',
       '/pairing/qr'
     ]
 

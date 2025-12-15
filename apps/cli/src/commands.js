@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
+import { NAVIS_PATHS } from '@navisai/api-contracts'
 
 const execAsync = promisify(exec)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -85,10 +86,10 @@ export async function upCommand(options = {}) {
 
       // Check if daemon is responding on the canonical origin
       try {
-        const response = await fetch(`${CANONICAL_ORIGIN}/status`)
+        const response = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.status}`)
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         console.log(`🌐 Access at: ${CANONICAL_ORIGIN}`)
-        console.log(`📱 Onboarding: ${CANONICAL_ORIGIN}/welcome`)
+        console.log(`📱 Onboarding: ${CANONICAL_ORIGIN}${NAVIS_PATHS.welcome}`)
         return
       } catch {
         console.log('\n⚠️  Daemon started but is not reachable at the canonical origin')
@@ -145,7 +146,7 @@ export async function statusCommand() {
 
       // Try to get status from API
       try {
-        const response = await fetch(`${CANONICAL_ORIGIN}/status`)
+        const response = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.status}`)
         if (response.ok) {
           const status = await response.json()
           console.log('\nDaemon Status:')
@@ -248,7 +249,7 @@ export async function scanCommand(path, options = {}) {
     }
 
     // Call daemon API to scan
-    const response = await fetch(`${CANONICAL_ORIGIN}/discovery/scan`, {
+    const response = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.discovery.scan}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -322,7 +323,7 @@ export async function indexCommand(paths, options = {}) {
     }
 
     // Call daemon API to index
-    const response = await fetch(`${CANONICAL_ORIGIN}/discovery/index`, {
+    const response = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.discovery.index}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -376,12 +377,12 @@ export async function pairCommand(options = {}) {
     if (options.rePair) {
       console.log('🔄 Revoking existing pairings...')
       try {
-        const devicesResponse = await fetch(`${CANONICAL_ORIGIN}/devices`)
+        const devicesResponse = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.devices.list}`)
         if (devicesResponse.ok) {
           const { devices } = await devicesResponse.json()
           for (const device of devices) {
             if (!device.isRevoked) {
-              await fetch(`${CANONICAL_ORIGIN}/devices/${device.id}/revoke`, {
+              await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.devices.revoke(device.id)}`, {
                 method: 'POST'
               })
               console.log(`   Revoked: ${device.name}`)
@@ -394,7 +395,7 @@ export async function pairCommand(options = {}) {
     }
 
     // Get pairing information from daemon
-    const response = await fetch(`${CANONICAL_ORIGIN}/pairing/qr`)
+    const response = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.pairing.qr}`)
     if (!response.ok) {
       console.log('❌ Failed to get pairing information')
       process.exit(1)
@@ -424,7 +425,7 @@ export async function pairCommand(options = {}) {
     // In a real implementation, this would monitor for pairing events
     // For now, just show instructions
     console.log('\nNote: Real-time pairing status monitoring not yet implemented')
-    console.log(`      Check ${CANONICAL_ORIGIN}/welcome for pairing status`)
+    console.log(`      Check ${CANONICAL_ORIGIN}${NAVIS_PATHS.welcome} for pairing status`)
 
   } catch (error) {
     console.error('❌ Pairing failed:', error.message)
