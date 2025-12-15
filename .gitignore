@@ -1,14 +1,55 @@
-
+# Node
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+
+# Build outputs
 dist/
 build/
+.out/
+.next/
 .svelte-kit/
-.pnpm-store/
+coverage/
+*.log
+
+# Environment
 .env
 .env.*
-.navis/
+!.env.example   # keep the example
+
+# SQLite (local state)
 *.sqlite
+*.sqlite-journal
+*.db
+*.db-journal
+
+# Navis runtime state
+.navis/
+.navis-cache/
+.navis-local/
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Turborepo / pnpm storage
+.pnpm-store/
+.turbo/
+
+# Premium/private code (excluded from OSS)
 pro/
 premium/
 enterprise/
+
+# PWA generated assets
+apps/pwa/.svelte-kit/
+apps/pwa/build/
+apps/pwa/dist/
