@@ -158,9 +158,9 @@ PWA uses:
   - project listing
   - approvals
   - pairing
-- WebSocket for:
+ - WebSocket for:
   - streaming terminal output
-  - real-time updates
+  - real-time updates, including `approval.request` and `approval.updated` so the onboarding UI can surface pairing approval prompts immediately (see `docs/PAIRING_PROTOCOL.md`)
 
 All calls are authenticated via Authorization header (see `AUTH_MODEL.md`).
 
