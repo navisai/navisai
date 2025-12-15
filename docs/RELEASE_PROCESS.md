@@ -54,7 +54,7 @@ Initial OSS publish targets:
   - `@navisai/api-contracts`
   - `@navisai/logging` (if split as a package)
 
-PWA (`apps/pwa`) and daemon (`apps/daemon`) are primarily distributed as part of the repo, not as npm libraries, but may later be published as:
+PWA (`apps/pwa`) and daemon (`apps/daemon`) are publish targets to support an npm-first end-user installation flow:
 
 - `@navisai/daemon`
 - `@navisai/pwa`

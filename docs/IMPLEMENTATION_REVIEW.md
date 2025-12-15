@@ -1,109 +1,70 @@
 # NavisAI Implementation Review
 
-## Summary of Deviations from Documentation
+Canonical networking model: see `NETWORKING.md`.
+
+## Summary of Deviations from Canonical Model
 
 ### 1. **Port Configuration**
-- **Documentation**: Default port 47621 (configurable via config.json or CLI flags)
-- **Current Implementation**: Tries port 443 first, falls back to 8443
-- **Impact**: Requires sudo privileges for port 443, conflicts with docs
+- **Canonical**: Clean LAN URL is always `https://navis.local` (443 via Navis Bridge), daemon stays unprivileged on an internal port (default 47621).
+- **Current Implementation**: Mixes ported URLs and attempts to bind privileged ports directly.
+- **Impact**: Breaks the “no sudo during daily use” goal and creates inconsistent client behavior.
 
 ### 2. **DNS/Service Discovery**
-- **Documentation**: Uses mDNS/Bonjour for service discovery
-- **Current Implementation**: Requires manual hosts file modification for navis.local
-- **Impact**: Additional setup step, not automatic as intended
+- **Canonical**: Use mDNS/Bonjour so phones resolve `navis.local` to the host machine’s LAN IP. Never rely on `127.0.0.1 navis.local` for LAN clients.
+- **Current Implementation**: Includes hosts-file based strategies.
+- **Impact**: Hosts-based resolution breaks phone access and violates the desired seamless onboarding.
 
 ### 3. **Architecture Requirements**
-- **Documentation**: Daemon serves at `https://navis.local` (no port)
-- **Current Implementation**: Requires port number unless using port 443
-- **Impact**: User experience mismatch with documented expectations
+- **Canonical**: Everything is reachable at `https://navis.local` (no port). A local bridge owns 443; the daemon does not.
+- **Current Implementation**: Users must guess ports or run privileged commands.
+- **Impact**: Non-Apple-like UX and documentation drift.
 
 ## Recommendations
 
 ### Immediate Actions
 
-1. **Update Port Configuration**
-   ```javascript
-   // Use port 47621 by default (as per docs)
-   const DEFAULT_PORT = 47621
-   
-   // Allow configuration via:
-   // - ~/.navis/config.json
-   // - CLI flags: --port=47621
-   // - Environment: NAVIS_PORT=47621
-   ```
+1. **Introduce Navis Bridge**
+   - Provide a one-time `navisai setup` that installs an OS-integrated 443 → 47621 TCP forwarder.
+   - Daily usage (`navisai up`) must not require sudo.
 
-2. **Implement mDNS/Bonjour**
-   ```javascript
-   // Install: pnpm add bonjour-service
-   import bonjour from 'bonjour-service'
-   
-   // Announce service
-   const service = bonjour().publish({
-     name: 'NavisAI',
-     type: 'https',
-     port: config.daemon.port,
-     txt: {
-       path: '/welcome'
-     }
-   })
-   ```
+2. **Implement mDNS/Bonjour for `navis.local`**
+   - Advertise `navis.local` to the host machine’s LAN IP so phones resolve it automatically.
 
-3. **Port Forwarding Solution**
-   Since nginx is already on port 443:
-   ```nginx
-   # /etc/nginx/sites-available/navis
-   server {
-       listen 443 ssl;
-       server_name navis.local;
-       
-       location / {
-           proxy_pass https://127.0.0.1:47621;
-           proxy_ssl_verify off;
-           # ... other proxy settings
-       }
-   }
-   ```
+3. **Make onboarding a first-class PWA route**
+   - Serve the PWA from the daemon and make `/welcome` a PWA route (no inline HTML; no CDN dependencies).
 
 ### Long-term Solutions
 
-1. **Auto-configuration Setup Script**
-   - Detect and configure nginx proxy automatically
-   - Set up mDNS service discovery
-   - Generate appropriate SSL certificates
+1. **Polished setup experience**
+   - Guided trust/cert flow for mobile
+   - Clear diagnostics when `navis.local` is not resolving or 443 is not reachable
 
-2. **Zero-Configuration Discovery**
-   - Use mDNS so navis.local resolves without hosts file
-   - Client auto-discovers daemon port
-   - No sudo required
-
-3. **Follow Documentation Architecture**
-   - Port 47621 by default
-   - Configuration via `navis.config.json`
-   - User-level operation (no sudo)
+2. **Strict shared contracts**
+   - Define API/WS schema in `api-contracts` and generate/validate across daemon/CLI/PWA
 
 ## Code Changes Needed
 
-### 1. Update https-server.js
-- Remove port 443 logic
-- Use port from config (default 47621)
-- Add mDNS announcement
+### 1. Add Navis Bridge
+- Provide an OS-integrated 443 → 47621 TCP forwarder (launchd/systemd) so the daemon remains unprivileged.
 
-### 2. Update CLI
-- Add --port flag support
-- Read from navis.config.json
-- Auto-configure nginx if needed
+### 2. Update daemon networking
+- Bind daemon to `127.0.0.1:47621` by default (internal listener).
+- Ensure the daemon serves HTTPS + WSS with a cert valid for `navis.local`.
 
-### 3. Create setup wizard
+### 3. Update CLI
+- Add a first-class setup command for the one-time OS integration.
+- Keep `--port` as an advanced/debug option (not required for the canonical UX).
+
+### 4. Create setup wizard
 ```bash
 navisai setup
-# Detects nginx, offers to configure proxy
-# Sets up mDNS
-# Creates initial config
+# Enables Navis Bridge (443 → 47621)
+# Enables mDNS for navis.local on LAN
+# Generates/refreshes local certs
 ```
 
 ## Implementation Priority
 
-1. **High**: Fix port configuration to match docs (47621)
-2. **High**: Add nginx proxy configuration for navis.local without port
-3. **Medium**: Implement mDNS service discovery
-4. **Low**: Remove sudo requirement entirely
+1. **High**: Land `NETWORKING.md` as doc-of-record and align all docs
+2. **High**: Add Navis Bridge and mDNS resolution (enables clean URL)
+3. **Medium**: Align daemon + PWA to a single-origin API/WSS model

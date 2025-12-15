@@ -158,7 +158,7 @@ Actions must always go through the **approval system** before mutating state.
 For security and stability:
 
 - Plugins are **opt-in**, configured via:
-  - `navis.config.json`  
+  - `~/.navis/config.json`  
   - or CLI commands: `navisai plugins add <name>`
 - Core loads plugins from:
   - workspace `node_modules`

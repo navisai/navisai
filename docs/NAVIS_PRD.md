@@ -8,7 +8,7 @@ Status: Locked
 
 Navis AI is a **local-first developer control plane** that exposes the laptop’s development environment (terminals, AI agents, ACP sessions, Git repos, discovery metadata, etc.) to a **mobile-first PWA**.
 
-The system enables remote oversight, approvals, and light interaction with development workflows using a secure LAN-based pairing system (BLE, mDNS, QR, HTTP hint).
+The system enables remote oversight, approvals, and light interaction with development workflows using a secure LAN-based pairing system (BLE, mDNS, QR, HTTPS onboarding hint at `https://navis.local/welcome`).
 
 Navis does **not** modify user files without explicit approval.  
 Navis does **not** require cloud accounts in MVP.
@@ -33,7 +33,7 @@ Navis helps developers:
 ## 3. System Components
 
 ### 3.1 Navis Daemon (Core)
-- Local HTTP + WebSocket server.
+- Local HTTPS + WSS server.
 - Responsible for:
   - pairing + presence
   - project registry
@@ -46,6 +46,7 @@ Navis helps developers:
 Commands:
 
 ```
+navisai setup
 navisai up
 navisai down
 navisai status
@@ -53,6 +54,7 @@ navisai doctor
 navisai pair
 navisai projects
 navisai logs
+navisai reset
 ```
 
 ### 3.3 PWA (Phone + Desktop)
@@ -80,7 +82,7 @@ Four discovery signals:
 
 1. mDNS broadcast  
 2. BLE beacon  
-3. Local HTTP hint (`navis.local/welcome`)  
+3. Local HTTPS hint (`https://navis.local/welcome`)  
 4. QR pairing token  
 
 Pairing approval requires explicit user consent through laptop UI/CLI.

@@ -65,33 +65,37 @@ navisai/
 
 ## 🚀 Getting Started
 
-### 1. Install CLI Globally
+### 0. Install the CLI
 
 ```
-npm install -g navisai
+npm i -g @navisai/cli
 ```
 
-### 2. Start the daemon
+### 1. One-time setup (clean LAN URL)
+
+Navis targets a single Apple-like LAN origin:
+
+`https://navis.local` (no port)
+
+Run the one-time setup to enable the bridge + discovery needed for this experience:
+
+```
+navisai setup
+```
+
+### 2. Start Navis
 
 ```
 navisai up
 ```
 
-This will:
+### 3. Onboard
 
-- Start the local daemon  
-- Enable BLE + mDNS + QR pairing  
-- Open browser onboarding UI automatically  
+Open:
 
-### 3. Open the Navis PWA
+`https://navis.local/welcome`
 
-Visit:
-
-```
-https://navis.local
-```
-
-or scan the pairing QR from your phone.
+Scan the QR code from your phone to pair.
 
 ---
 
@@ -109,11 +113,12 @@ Start daemon + PWA together:
 pnpm dev
 ```
 
-You can start components individually:
+The PWA is served by the daemon (no separate PWA dev server in the canonical architecture).
+Build the PWA and run the daemon:
 
 ```
+pnpm --filter @navisai/pwa build
 pnpm --filter @navisai/daemon dev
-pnpm --filter @navisai/pwa dev
 ```
 
 ---
@@ -141,6 +146,12 @@ https://github.com/vite-pwa/sveltekit
 - Terminal, ACP, and file operations are sandboxed behind approvals  
 
 See: `SECURITY.md`
+
+Networking doc-of-record: `docs/NETWORKING.md`
+
+Setup guide: `docs/SETUP.md`
+
+NPM distribution: `docs/DISTRIBUTION.md`
 
 ---
 

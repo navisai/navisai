@@ -3,6 +3,8 @@
 Version: v0.1  
 Status: Draft (MVP-aligned)
 
+Canonical networking model: see `NETWORKING.md`.
+
 ---
 
 ## 1. Goals
@@ -34,7 +36,7 @@ Pairing uses multiple discovery channels:
 1. **QR Code** (primary)
 2. **mDNS/Bonjour** (service advertisement)
 3. **BLE Beacon** (optional, if hardware permits)
-4. **HTTP Onboarding Page** (`https://navis.local` or `https://<host>:port/welcome`)
+4. **Onboarding Page** (`https://navis.local/welcome`)
 
 These are used only to **discover the daemon** and **bootstrap** a secure pairing flow.
 
@@ -79,8 +81,7 @@ When the daemon is in `DISCOVERABLE`:
    {
      "type": "navis-pairing",
      "version": 1,
-     "host": "<daemon-local-hostname-or-ip>",
-     "port": <https-port>,
+     "origin": "https://navis.local",
      "pairingToken": "<random-128-bit-hex>"
    }
    ```
@@ -109,8 +110,8 @@ Daemon announces:
 - Service: `_navisai._tcp.local`
 - TXT records:
   - `version=1`
-  - `host=<hostname>`
   - `tls=1`
+  - `origin=https://navis.local`
 
 Clients can discover the daemon and then request QR or start pairing through the onboarding page.
 
@@ -175,7 +176,7 @@ On approval, daemon:
    {
      "deviceId": "<uuid>",
      "deviceSecret": "<random-secret>",
-     "apiBaseUrl": "https://<host>:<port>"
+     "apiBaseUrl": "https://navis.local"
    }
    ```
 

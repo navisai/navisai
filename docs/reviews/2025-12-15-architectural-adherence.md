@@ -1,12 +1,15 @@
-# NavisAI Architectural Adherence Review
+# NavisAI Architectural Adherence Review (Historical)
 **Date**: 2025-12-15  
 **Review Focus**: Implementation vs Documentation Requirements  
 
+This is a point-in-time review and is retained for historical context.
+The doc-of-record for current requirements is `docs/NETWORKING.md` (and related docs referenced from it).
+
 ## ARCHITECTURAL VIOLATIONS
 
-VIOLATION: Daemon does not serve HTTPS at https://navis.local (port 443) as required by AGENTS.md:24
+VIOLATION: System does not provide a clean `https://navis.local` entrypoint (port 443 via Navis Bridge) as required by `docs/NETWORKING.md`
 
-VIOLATION: CLI suggests manual nginx proxy configuration instead of implementing seamless UX, violating user requirement of "users should not need to think about nginx"
+VIOLATION: System lacks an invisible, programmatic 443 entrypoint (Navis Bridge), forcing users toward manual proxying strategies
 
 VIOLATION: mDNS/Bonjour service discovery not implemented despite being documented as the solution for seamless navis.local access
 
@@ -20,7 +23,7 @@ VIOLATION: Core services (logging, discovery, db) not properly integrated into d
 
 VIOLATION: Daemon serves on port 47621 requiring explicit port in URL, breaking documented seamless access
 
-VIOLATION: navis.local resolution requires manual /etc/hosts entry instead of mDNS automation
+VIOLATION: navis.local resolution is not reliably provided via mDNS on LAN (and must not depend on hosts-file hacks for phone clients)
 
 VIOLATION: Onboarding flow at /welcome not served from proper daemon implementation
 

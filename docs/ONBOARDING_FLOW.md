@@ -2,6 +2,8 @@
 
 Version: v0.1
 
+Canonical networking model: see `NETWORKING.md`.
+
 ---
 
 # 1. Trigger
@@ -15,19 +17,45 @@ Daemon enters `STARTING` then `UNPAIRED`.
 
 ---
 
-# 2. Automatic Actions
+# 2. One-time Setup (Required for clean LAN URL)
 
-1. Launch daemon (HTTP + WS)
-2. Emit presence:
-   - mDNS advertisement
-   - BLE beacon (10 min timeout)
-   - QR code for pairing token
-   - HTTP onboarding shell (`navis.local/welcome`)
-3. Auto-open browser (only if GUI session exists)
+To deliver the clean, Apple-like LAN experience at `https://navis.local` (no port), the machine must be prepared once:
+
+```
+navisai setup
+```
+
+Setup responsibilities (explicit user consent; may require admin privileges):
+
+1. Enable the Navis Bridge (TCP 443 → daemon port 47621).
+2. Enable mDNS/Bonjour so `navis.local` resolves on the LAN to the host machine’s LAN IP.
+3. Generate/refresh local certificates for `navis.local` (used by the daemon).
+4. Provide guided steps for mobile trust (iOS requires an explicit trust action for local certificates).
+
+Setup is never silent and is fully reversible.
 
 ---
 
-# 3. Browser Onboarding Experience
+# 3. Daily Startup (No sudo)
+
+On every run:
+
+1. Start daemon (HTTPS + WSS), unprivileged.
+2. Ensure discovery signals are active when `UNPAIRED`:
+   - mDNS advertisement
+   - BLE beacon (optional; time-limited)
+   - QR code for pairing token
+3. Print the canonical onboarding URL:
+
+```
+https://navis.local/welcome
+```
+
+Optionally offer to open the browser (opt-in or interactive prompt), rather than doing so silently.
+
+---
+
+# 4. Browser Onboarding Experience (PWA)
 
 ### 3.1 Welcome Screen
 - “Navis is running locally”
@@ -69,7 +97,7 @@ Offer installation for mobile. The PWA is built with SvelteKit and styled with T
 Navis AI is running.
 Discovery active.
 Pairing mode enabled.
-Opened browser for onboarding.
+Onboarding URL: https://navis.local/welcome
 ```
 
 ---

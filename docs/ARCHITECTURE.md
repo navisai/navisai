@@ -8,7 +8,7 @@ Status: Updated With PWA Starter Integration
 
 Navis is composed of three primary executables and several shared internal packages:
 
-- **Daemon** — local backend (HTTP + WebSocket)
+- **Daemon** — local backend (HTTPS + WSS)
 - **CLI** (`navisai`) — entrypoint for developers; manages daemon
 - **PWA** — mobile-first UI for monitoring and approvals
 - **Shared Packages** — core logic, discovery engine, DB access layer, API contracts
@@ -41,18 +41,27 @@ Navis is composed of three primary executables and several shared internal packa
 
 The daemon is the operational nerve center of Navis. Responsibilities:
 
-- HTTP server (REST)
-- WebSocket server (live updates)
-- Device pairing: BLE, mDNS, QR token, HTTP hint service
+- HTTPS server (REST)
+- WebSocket server (live updates, over WSS)
+- Device pairing: BLE, mDNS, QR token, HTTPS onboarding hint at `/welcome` (served at `https://navis.local/welcome`)
 - Project discovery + classification pipeline
 - Session registry (terminal, ACP, other agents)
 - Approvals pipeline
 - Persistence in SQLite
 
+**Networking:**
+
+- Canonical origin for LAN clients: `https://navis.local` (no port)
+- The daemon remains unprivileged and listens on an internal port by default.
+- A small OS-integrated bridge owns 443 and forwards to the daemon.
+- mDNS/Bonjour provides `navis.local` resolution on the LAN.
+
+See: `NETWORKING.md` and `IPC_TRANSPORT.md`.
+
 **Tech Stack:**
 
 - Node.js LTS
-- Fastify or Hono for HTTP
+- Fastify for HTTPS + WebSocket
 - ws or socket.io for real-time events
 - SQLite via better-sqlite3 or Prisma (recommended)
 
@@ -354,7 +363,7 @@ The architecture is intentionally designed so that:
 
 - `@navisai/daemon` can be embedded into other dev tools
 - `@navisai/discovery` can be used standalone
-- CLI can be installed globally (`npm i -g navisai`)
+- CLI can be installed globally (`npm i -g @navisai/cli`)
 - PWA can be bundled and served by the daemon directly
 - Plugin authors can depend on core libraries
 

@@ -10,7 +10,7 @@ Security principles:
 - All data is stored locally using SQLite  
 - Device pairing must be explicit and user-approved  
 - BLE/mDNS/QR pairing exposes no secrets  
-- All network activity uses HTTPS on localhost  
+- All LAN access uses HTTPS at `https://navis.local` (no port)  
 
 ---
 
@@ -33,8 +33,9 @@ Do NOT open GitHub issues for security concerns.
 
 ## 4. Local Daemon Rules
 
-- The daemon binds only to local network interfaces.  
-- Public access is strictly prohibited.  
+- The daemon is not a privileged process.  
+- The daemon binds to loopback by default (`127.0.0.1`) and is reached over LAN via a local bridge on 443.  
+- Public Internet exposure is strictly prohibited.  
 - All pairing attempts require explicit approval from the primary machine.
 
 ---

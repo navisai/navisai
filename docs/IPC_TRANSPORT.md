@@ -3,6 +3,8 @@
 Version: v0.1  
 Scope: Daemon ⇄ CLI ⇄ PWA (SvelteKit + Tailwind CSS v4) communications
 
+Canonical networking model: see `NETWORKING.md`.
+
 ---
 
 ## 1. Goals
@@ -33,16 +35,30 @@ Scope: Daemon ⇄ CLI ⇄ PWA (SvelteKit + Tailwind CSS v4) communications
 
 ## 3. Ports & Host Binding
 
-Daemon listens on:
+### Canonical user-facing origin (LAN)
 
-- Host: `0.0.0.0` (LAN access allowed if enabled in config)
-- Default port: `47621` (example; configurable)
-- Protocol: HTTPS with self-signed cert
+- `https://navis.local` (no port)
+- `wss://navis.local/ws`
 
-Configurable via:
+### Daemon internal listener (default)
 
-- `navis.config.json`
-- CLI flags: `navisai up --port=...`
+The daemon listens on loopback and is reached via the Navis Bridge:
+
+- Host: `127.0.0.1`
+- Default port: `47621` (configurable)
+- Protocol: HTTPS with a certificate valid for `navis.local`
+
+### Bridge (443 entrypoint)
+
+The Navis Bridge listens on TCP 443 and forwards to `127.0.0.1:47621` (TCP passthrough).
+This enables the clean URL without running the daemon as a privileged process.
+
+### Configuration
+
+Daemon port is configurable via:
+
+- `~/.navis/config.json`
+- CLI flags: `navisai up --port=...` (advanced/debugging)
 
 ---
 
@@ -77,7 +93,7 @@ Examples:
 WebSocket endpoint:
 
 ```
-wss://<host>:<port>/ws
+wss://navis.local/ws
 ```
 
 Client authenticates on connect via query params or headers (see `AUTH_MODEL.md`).
@@ -115,17 +131,16 @@ CLI uses:
   - `POST /shutdown`
   - `GET /logs` (optional tail)
 - Local environment detection:
-  - CLI knows how to start daemon (e.g. `node apps/daemon/dist/index.js`)
+  - CLI knows how to start the daemon from the published `@navisai/daemon` entrypoint, and from workspace sources in dev.
 
 Flow example:
 
 - `navisai up`:
-  - Check if daemon already running (`GET /status`)
-  - If not, spawn daemon process
-  - Poll until daemon ready
+  - Starts daemon process (unprivileged)
+  - Polls `GET /status` via `https://navis.local`
 
 - `navisai status`:
-  - `GET /status` and format to console.
+  - `GET /status` via `https://navis.local` and format to console.
 
 ---
 
@@ -151,9 +166,9 @@ Daemon enforces CORS:
 
 - Allowed origins:
   - PWA origin (same host/port)
-  - Additional origins can be configured in `navis.config.json`.
+  - Additional origins can be configured in `~/.navis/config.json`.
 - For LAN-based access:
-  - PWA is served from daemon itself; origin is consistent.
+  - PWA is served from the daemon and reached via `https://navis.local`; origin is consistent.
 - No wildcard `*` allowed for protected endpoints.
 
 ---
