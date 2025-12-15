@@ -7,6 +7,28 @@ If a conflict exists, **this file overrides Global AGENTS.md** for this reposito
 
 ---
 
+## 0. Docs Are Canonical (No Veering)
+
+- The `docs/` folder is the source of truth for architecture, onboarding, setup, pairing, networking, IPC, auth, local-first guarantees, and security. Before implementing or changing behavior, identify the relevant doc(s) and keep code aligned to them.
+- If documentation conflicts:
+  - Treat `docs/NETWORKING.md` as the doc-of-record for canonical origin and LAN access.
+  - Update the conflicting doc(s) to match `docs/NETWORKING.md` (do not “split the difference”).
+- If code and docs conflict, assume docs are canonical and update code (and docs if needed) to remove ambiguity.
+- Do not improvise new architecture. If requirements are not covered, add/extend docs in `docs/` first, then implement.
+
+### Required Doc Cross-Checks (Use As a Map)
+- Networking / origins / ports / bridge / mDNS: `docs/NETWORKING.md`, `docs/SETUP.md`, `docs/SECURITY.md`
+- macOS user setup experience: `docs/MACOS_SETUP_EXPERIENCE.md`, `docs/ONBOARDING_FLOW.md`
+- REST/WS endpoints: `docs/IPC_TRANSPORT.md`, `packages/api-contracts`
+- Auth / device trust: `docs/AUTH_MODEL.md`, `docs/PAIRING_PROTOCOL.md`, `packages/db`
+- Local-first guarantees: `docs/LOCAL_FIRST_GUARANTEES.md`, `docs/SECURITY.md`
+
+### Change Log Discipline (For Every Patch)
+- State which doc(s) you are implementing.
+- If you introduce a new endpoint or event, update `packages/api-contracts` and `docs/IPC_TRANSPORT.md` in the same change.
+- If you touch setup/onboarding UX, re-check alignment with `docs/SETUP.md` and `docs/ONBOARDING_FLOW.md` and update wording to match.
+
+
 ## 1. Project Snapshot (NavisAI)
 
 - **Project type**: Local-first developer control plane
@@ -21,10 +43,13 @@ If a conflict exists, **this file overrides Global AGENTS.md** for this reposito
 - **Core principle**: Human-in-the-loop by default
 
 ### Critical Architecture Requirements
-- Daemon **MUST** serve HTTPS at `https://navis.local` 
-- Daemon **MUST** include onboarding flow at `/welcome`
+- Canonical origin is always `https://navis.local` (no port) for LAN clients (`docs/NETWORKING.md`).
+- Daemon is unprivileged and binds loopback by default (`127.0.0.1:47621`); a one-time, OS-managed bridge owns 443 and forwards TCP to the daemon (TLS passthrough).
+- Daemon **MUST** serve HTTPS + WSS with a certificate valid for `navis.local`.
+- Daemon **MUST** include onboarding flow at `/welcome` (PWA route served by the daemon)
 - Daemon **MUST** serve the PWA (not separate dev server)
 - PWA connects to daemon via HTTPS, NOT separate ports
+- mDNS/Bonjour is used for LAN name resolution/discovery for `navis.local` (no hosts-file hacks for phone/LAN clients).
 
 ---
 
@@ -66,7 +91,9 @@ These rules **override** any permissive defaults in Global AGENTS.md:
    - `pnpm install` must succeed even if native builds fail.
 
 3. **No auto-starting behavior**
-   - Nothing binds ports, pairs devices, or launches services on install.
+   - Installing packages must not start services or bind ports.
+   - OS-level bridge/service installation is allowed only during explicit, user-consented setup flows (GUI setup app/installer or `navisai setup`).
+   - The daemon must not auto-start at install time.
 
 4. **Human-in-the-loop by default**
    - Destructive, privileged, or state-changing actions require approval paths.
@@ -100,7 +127,7 @@ These rules **override** any permissive defaults in Global AGENTS.md:
 
 **Svelte validation**:
   - Use `svelte-check` to validate Svelte components before commits
-  - Run `npx svelte-check` in apps/pwa directory to check for errors
+  - Run `pnpm --filter @navisai/pwa check` to check for errors
   - Fix all TypeScript and Svelte-specific errors found
 
 Agents must not introduce alternative package managers or global installs.
@@ -110,6 +137,10 @@ Agents must not introduce alternative package managers or global installs.
 ## 5. Command Discipline
 
 Run only commands that exist in the relevant `package.json`.
+
+Notes:
+- Prefer `pnpm --filter <pkg> <script>` over `npx` or ad-hoc global tooling.
+- When a command requires network access or OS privileges, it must be tied to an explicit user action (setup/reset/doctor) and surfaced clearly in UX/logs.
 
 ### Install
 ```bash
@@ -194,7 +225,7 @@ Logs are part of the UX for a local control plane.
    - Respect daemon boundaries
 
 3. **Lint Files & Remove Errors**
-   - Run `svelte-check` in apps/pwa directory: `pnpm check`
+   - Run `pnpm --filter @navisai/pwa check`
    - Fix all TypeScript and Svelte-specific errors found
    - Ensure no accessibility warnings
 
@@ -237,7 +268,7 @@ Logs are part of the UX for a local control plane.
 - Default to local-only
 - **ALL network activity MUST use HTTPS** (per SECURITY.md)
 - LAN exposure must be explicit and gated
-- Daemon is a privileged process
+- Daemon is an unprivileged process; the bridge/service is the only privileged component and is installed only with explicit user consent during setup
 - Never assume trust without pairing + approval
 - No cloud dependencies in OSS version
 - All data stored locally in SQLite at `~/.navis/db.sqlite`
