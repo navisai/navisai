@@ -22,10 +22,11 @@ class NavisDaemon {
   constructor() {
     this.server = null
     this.wss = null
-    this.port = 3415 // Default port, will be configurable later
+    this.port = 443 // Try standard HTTPS port first
     this.isRunning = false
     this.sslManager = null
     this.mdnsAnnouncer = null
+    this.usingAlternativePort = false
   }
 
   async start() {
@@ -58,11 +59,29 @@ class NavisDaemon {
       // Create WebSocket server (will be upgraded from HTTPS)
       this.wss = new WebSocketServer({ noServer: true })
 
-      // Start the HTTPS server
-      const httpsServer = await this.server.listen({
-        port: this.port,
-        host: '0.0.0.0'  // Listen on all interfaces for navis.local
-      })
+      // Try to start the HTTPS server, fallback to 8443 if needed
+      let httpsServer
+      try {
+        httpsServer = await this.server.listen({
+          port: this.port,
+          host: '0.0.0.0'  // Listen on all interfaces for navis.local
+        })
+      } catch (error) {
+        if (error.code === 'EACCES' || error.code === 'EADDRINUSE') {
+          console.log('⚠️  Could not bind to port 443 (requires admin privileges)')
+          console.log('   Falling back to port 8443...')
+
+          this.port = 8443
+          this.usingAlternativePort = true
+
+          httpsServer = await this.server.listen({
+            port: this.port,
+            host: '0.0.0.0'
+          })
+        } else {
+          throw error
+        }
+      }
 
       // Handle WebSocket upgrade
       httpsServer.on('upgrade', (request, socket, head) => {
@@ -79,9 +98,19 @@ class NavisDaemon {
       this.mdnsAnnouncer = new MDNSAnnouncer(this.port)
       this.mdnsAnnouncer.start()
 
-      console.log(`🚀 Navis daemon running on https://navis.local:${this.port}`)
-      console.log(`📡 WebSocket server ready at wss://navis.local:${this.port}/ws`)
-      console.log(`👋 Onboarding flow available at https://navis.local:${this.port}/welcome`)
+      // Show the correct URL based on port
+      const baseUrl = this.usingAlternativePort
+        ? `https://navis.local:${this.port}`
+        : 'https://navis.local'
+
+      console.log(`🚀 Navis daemon running on ${baseUrl}`)
+      console.log(`📡 WebSocket server ready at ${this.usingAlternativePort ? 'wss://navis.local:8443/ws' : 'wss://navis.local/ws'}`)
+      console.log(`👋 Onboarding flow available at ${baseUrl}/welcome`)
+
+      if (this.usingAlternativePort) {
+        console.log('\n💡 Tip: Use port 443 for invisible access (requires admin privileges):')
+        console.log('   sudo navisai up')
+      }
 
       this.isRunning = true
 

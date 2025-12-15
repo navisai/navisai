@@ -34,8 +34,8 @@ export async function upCommand() {
     const startedProcess = await findDaemonProcess()
     if (startedProcess) {
       console.log('✅ Navis daemon started successfully')
-      console.log('🌐 Access at: https://navis.local:3415')
-      console.log('📱 Onboarding: https://navis.local:3415/welcome')
+      console.log('🌐 Access at: https://navis.local')
+      console.log('📱 Onboarding: https://navis.local/welcome')
     } else {
       console.log('❌ Failed to start daemon')
       if (stderr) console.error(stderr)
@@ -87,7 +87,7 @@ export async function statusCommand() {
 
       // Try to get status from API
       try {
-        const response = await fetch('https://navis.local:3415/api/status')
+        const response = await fetch('https://navis.local/api/status')
         if (response.ok) {
           const status = await response.json()
           console.log('\nDaemon Status:')
@@ -208,7 +208,7 @@ export async function scanCommand(path, options = {}) {
     }
 
     // Call daemon API to scan
-    const response = await fetch('https://navis.local:3415/api/discovery/scan', {
+    const response = await fetch('https://navis.local/api/discovery/scan', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -282,7 +282,7 @@ export async function indexCommand(paths, options = {}) {
     }
 
     // Call daemon API to index
-    const response = await fetch('https://navis.local:3415/api/discovery/index', {
+    const response = await fetch('https://navis.local/api/discovery/index', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -336,12 +336,12 @@ export async function pairCommand(options = {}) {
     if (options.rePair) {
       console.log('🔄 Revoking existing pairings...')
       try {
-        const devicesResponse = await fetch('https://navis.local:3415/api/devices')
+        const devicesResponse = await fetch('https://navis.local/api/devices')
         if (devicesResponse.ok) {
           const { devices } = await devicesResponse.json()
           for (const device of devices) {
             if (!device.isRevoked) {
-              await fetch(`https://navis.local:3415/api/devices/${device.id}/revoke`, {
+              await fetch(`https://navis.local/api/devices/${device.id}/revoke`, {
                 method: 'POST'
               })
               console.log(`   Revoked: ${device.name}`)
@@ -354,7 +354,7 @@ export async function pairCommand(options = {}) {
     }
 
     // Get pairing information from daemon
-    const response = await fetch('https://navis.local:3415/pairing/qr')
+    const response = await fetch('https://navis.local/pairing/qr')
     if (!response.ok) {
       console.log('❌ Failed to get pairing information')
       process.exit(1)
