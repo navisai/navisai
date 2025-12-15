@@ -7,7 +7,7 @@
   },
   "type": "module",
   "dependencies": {
-    "@navisai/db": "workspace:*",
+    "@navisai/daemon": "workspace:*",
     "commander": "^12.1.0"
   }
 }

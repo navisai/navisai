@@ -4,10 +4,40 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
-import { discoveryService } from '../../../packages/discovery/service.js'
+import { createRequire } from 'node:module'
 
 const execAsync = promisify(exec)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const require = createRequire(import.meta.url)
+
+const CANONICAL_ORIGIN = 'https://navis.local'
+
+function resolveDaemonEntrypoint() {
+  try {
+    return require.resolve('@navisai/daemon/src/index.js')
+  } catch {
+    return path.join(__dirname, '..', '..', 'daemon', 'src', 'index.js')
+  }
+}
+
+export async function setupCommand() {
+  console.log('NavisAI Setup')
+  console.log('=============\n')
+  console.log(`Goal: clean LAN origin at ${CANONICAL_ORIGIN}\n`)
+  console.log('This command will enable (one-time, user-approved):')
+  console.log('- Navis Bridge (443 -> 47621)')
+  console.log('- mDNS/Bonjour for navis.local on LAN')
+  console.log('- TLS certificates and guided mobile trust\n')
+  console.log('Status: not implemented yet.')
+  console.log('See `docs/SETUP.md`.')
+}
+
+export async function resetCommand() {
+  console.log('NavisAI Reset')
+  console.log('=============\n')
+  console.log('Status: not implemented yet.')
+  console.log('See `docs/SETUP.md`.')
+}
 
 export async function upCommand(options = {}) {
   try {
@@ -20,8 +50,8 @@ export async function upCommand(options = {}) {
       return
     }
 
-    // Start daemon in background
-    const daemonPath = path.join(__dirname, '..', '..', 'daemon', 'src', 'index.js')
+    // Start daemon in background (published entrypoint or workspace fallback)
+    const daemonPath = resolveDaemonEntrypoint()
 
     // Set up environment
     const env = { ...process.env }
@@ -30,7 +60,7 @@ export async function upCommand(options = {}) {
     }
 
     // Start daemon with spawn
-    const daemon = spawn('node', [daemonPath], {
+    const daemon = spawn(process.execPath, [daemonPath], {
       detached: true,
       stdio: 'ignore',
       env,
@@ -53,34 +83,17 @@ export async function upCommand(options = {}) {
     if (startedProcess) {
       console.log('✅ Navis daemon started successfully')
 
-      // Check if daemon is responding on the expected port
+      // Check if daemon is responding on the canonical origin
       try {
-        // Try without port first (if properly configured)
-        let response = await fetch('https://navis.local/api/status')
-        if (response.ok) {
-          console.log('🌐 Access at: https://navis.local')
-          console.log('📱 Onboarding: https://navis.local/welcome')
-          return
-        }
+        const response = await fetch(`${CANONICAL_ORIGIN}/status`)
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        console.log(`🌐 Access at: ${CANONICAL_ORIGIN}`)
+        console.log(`📱 Onboarding: ${CANONICAL_ORIGIN}/welcome`)
+        return
       } catch {
-        // Try common ports from IPC_TRANSPORT.md
-        // Reference: docs/IPC_TRANSPORT.md - "Default port: 47621 (example; configurable)"
-        const ports = [47621, 47622, 47623, 8443]
-        for (const port of ports) {
-          try {
-            const response = await fetch(`https://navis.local:${port}/api/status`)
-            if (response.ok) {
-              console.log(`🌐 Access at: https://navis.local:${port}`)
-              console.log(`📱 Onboarding: https://navis.local:${port}/welcome`)
-              // Architecture requires seamless UX without manual nginx per AGENTS.md
-              return
-            }
-          } catch {
-            continue
-          }
-        }
-        console.log('\n⚠️  Daemon is running but not responding on expected ports')
-        console.log('   Try: navisai status --port=<port>')
+        console.log('\n⚠️  Daemon started but is not reachable at the canonical origin')
+        console.log(`   Expected: ${CANONICAL_ORIGIN}`)
+        console.log('   Run: navisai doctor')
       }
     } else {
       console.log('❌ Failed to start daemon')
@@ -132,33 +145,12 @@ export async function statusCommand() {
 
       // Try to get status from API
       try {
-        // Try without port first - mDNS should resolve navis.local per architecture
-        // Reference: AGENTS.md - "Daemon MUST serve HTTPS at https://navis.local"
-        let response = await fetch('https://navis.local/api/status')
-        let usingPort = 'default'
-
-        if (!response.ok) {
-          // Try common ports
-          const ports = [47621, 47622, 47623, 8443]
-          for (const port of ports) {
-            try {
-              response = await fetch(`https://navis.local:${port}/api/status`)
-              if (response.ok) {
-                usingPort = port
-                break
-              }
-            } catch {
-              continue
-            }
-          }
-        }
-
+        const response = await fetch(`${CANONICAL_ORIGIN}/status`)
         if (response.ok) {
           const status = await response.json()
           console.log('\nDaemon Status:')
           console.log('  Version:', status.version)
           console.log('  Database:', status.database ? '✅ Connected' : '❌ Disconnected')
-          console.log('  Port:', usingPort)
           console.log('  Uptime:', new Date(status.timestamp).toLocaleString())
         }
       } catch {
@@ -189,8 +181,8 @@ export async function doctorCommand() {
     allGood = false
   }
 
-  // Check if daemon can be found
-  const daemonPath = path.join(__dirname, '..', '..', 'daemon', 'src', 'index.js')
+  // Check if daemon entrypoint can be resolved
+  const daemonPath = resolveDaemonEntrypoint()
   try {
     await fs.access(daemonPath)
     console.log('✅ Daemon binary found')
@@ -199,36 +191,18 @@ export async function doctorCommand() {
     allGood = false
   }
 
-  // Check database availability
+  // Check canonical origin reachability (best-effort)
   try {
-    // Import from relative path since we're in monorepo
-    const { dbManager, isAvailable } = await import('../../../packages/db/index.js')
-    await dbManager.initialize(':memory:')
-    if (isAvailable()) {
-      console.log('✅ Database accessible')
+    const response = await fetch(`${CANONICAL_ORIGIN}/status`)
+    if (response.ok) {
+      console.log(`✅ Reachable: ${CANONICAL_ORIGIN}`)
     } else {
-      console.log('⚠️  Database native driver not available (will run without persistence)')
+      console.log(`⚠️  Not reachable at ${CANONICAL_ORIGIN} (HTTP ${response.status})`)
+      allGood = false
     }
-    await dbManager.close()
   } catch (error) {
-    console.log('❌ Database initialization failed:', error.message)
-    allGood = false
-  }
-
-  // Check if port is available
-  const port = 3415
-  try {
-    const net = await import('node:net')
-    const server = net.default.createServer()
-    server.listen(port, '127.0.0.1', () => {
-      server.close()
-      console.log('✅ Port', port, 'is available')
-    })
-    server.on('error', () => {
-      console.log('⚠️  Port', port, 'is already in use (daemon may be running)')
-    })
-  } catch (error) {
-    console.log('❌ Port check failed:', error.message)
+    console.log(`⚠️  Not reachable at ${CANONICAL_ORIGIN}`)
+    console.log(`   ${error.message}`)
     allGood = false
   }
 
@@ -274,7 +248,7 @@ export async function scanCommand(path, options = {}) {
     }
 
     // Call daemon API to scan
-    const response = await fetch('https://navis.local/api/discovery/scan', {
+    const response = await fetch(`${CANONICAL_ORIGIN}/discovery/scan`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -348,7 +322,7 @@ export async function indexCommand(paths, options = {}) {
     }
 
     // Call daemon API to index
-    const response = await fetch('https://navis.local/api/discovery/index', {
+    const response = await fetch(`${CANONICAL_ORIGIN}/discovery/index`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -402,12 +376,12 @@ export async function pairCommand(options = {}) {
     if (options.rePair) {
       console.log('🔄 Revoking existing pairings...')
       try {
-        const devicesResponse = await fetch('https://navis.local/api/devices')
+        const devicesResponse = await fetch(`${CANONICAL_ORIGIN}/devices`)
         if (devicesResponse.ok) {
           const { devices } = await devicesResponse.json()
           for (const device of devices) {
             if (!device.isRevoked) {
-              await fetch(`https://navis.local/api/devices/${device.id}/revoke`, {
+              await fetch(`${CANONICAL_ORIGIN}/devices/${device.id}/revoke`, {
                 method: 'POST'
               })
               console.log(`   Revoked: ${device.name}`)
@@ -420,7 +394,7 @@ export async function pairCommand(options = {}) {
     }
 
     // Get pairing information from daemon
-    const response = await fetch('https://navis.local/pairing/qr')
+    const response = await fetch(`${CANONICAL_ORIGIN}/pairing/qr`)
     if (!response.ok) {
       console.log('❌ Failed to get pairing information')
       process.exit(1)
@@ -433,24 +407,24 @@ export async function pairCommand(options = {}) {
     console.log('================\n')
     console.log('1. Scan QR Code:')
     console.log('   - Open your phone camera')
-    console.log('   - Scan the QR code at: https://navis.local/pairing\n')
+    console.log(`   - Scan the QR code at: ${CANONICAL_ORIGIN}/pairing\n`)
     console.log('\n2. Pairing Code:')
     console.log('   - Open Navis app on your phone')
     console.log('   - Go to Settings > Pair New Device')
     console.log('   - Enter pairing code:', pairingData.id.toUpperCase(), '\n')
     console.log('3. Direct URL:')
-    console.log('   - On your phone, visit: https://navis.local')
+    console.log(`   - On your phone, visit: ${CANONICAL_ORIGIN}`)
     console.log('   - Accept the security certificate')
     console.log('   - Follow the on-screen pairing instructions\n')
 
-    console.log('🌐 Pairing URL: https://navis.local/pairing')
+    console.log(`🌐 Pairing URL: ${CANONICAL_ORIGIN}/pairing`)
     console.log('📱 Pairing Code:', pairingData.id.toUpperCase())
     console.log('\nWaiting for device to pair... (Press Ctrl+C to cancel)')
 
     // In a real implementation, this would monitor for pairing events
     // For now, just show instructions
     console.log('\nNote: Real-time pairing status monitoring not yet implemented')
-    console.log('      Check https://navis.local/welcome for pairing status')
+    console.log(`      Check ${CANONICAL_ORIGIN}/welcome for pairing status`)
 
   } catch (error) {
     console.error('❌ Pairing failed:', error.message)
@@ -465,7 +439,7 @@ async function findDaemonProcess() {
     let cmd
 
     if (platform === 'darwin' || platform === 'linux') {
-      cmd = 'ps ax | grep -E "node.*apps/daemon/src/index.js[^/]" | grep -v grep'
+      cmd = 'ps ax | grep -E \"node.*(apps/daemon/src/index.js|@navisai/daemon/src/index.js|navisai-daemon)\" | grep -v grep'
     } else if (platform === 'win32') {
       cmd = 'tasklist /fi "imagename eq node.exe" /fo csv | findstr index.js'
     } else {

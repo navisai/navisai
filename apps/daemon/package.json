@@ -1,8 +1,24 @@
 {
   "name": "@navisai/daemon",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "bin": {
+    "navisai-daemon": "src/index.js"
+  },
+  "files": [
+    "src",
+    "daemon.js",
+    "middleware",
+    "services",
+    "ssl-manager.js",
+    "websocket-manager.js",
+    "README.md"
+  ],
   "scripts": {
     "dev": "node src/index.js",
     "start": "node src/index.js"

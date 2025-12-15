@@ -6,7 +6,6 @@
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { drizzle as drizzleLibsql } from 'drizzle-orm/libsql'
 import { createClient } from '@libsql/client'
-import Database from 'better-sqlite3'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
@@ -33,7 +32,8 @@ class DatabaseManager {
 
       // Try to use native SQLite driver first
       try {
-        this.nativeDB = new Database(this.dbPath)
+        const BetterSqlite3 = await import('better-sqlite3').then(m => m.default)
+        this.nativeDB = new BetterSqlite3(this.dbPath)
         this.db = drizzle(this.nativeDB, { schema })
         this.isUsingNativeDriver = true
         logger.info('Database initialized with native SQLite driver', {

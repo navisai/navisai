@@ -15,8 +15,10 @@
     "drizzle-orm": "^0.35.0",
     "nanoid": "^5.0.7"
   },
-  "devDependencies": {
-    "@types/node": "^22.0.0",
+  "optionalDependencies": {
     "better-sqlite3": "^9.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
   }
 }

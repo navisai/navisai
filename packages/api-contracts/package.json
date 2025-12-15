@@ -1,0 +1,10 @@
+{
+  "name": "@navisai/api-contracts",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  }
+}

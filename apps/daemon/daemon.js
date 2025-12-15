@@ -47,7 +47,6 @@ const DEFAULT_CONFIG = {
 import { SSLManager } from './ssl-manager.js'
 import { WebSocketManager } from './websocket-manager.js'
 import { createAuthMiddleware } from './middleware/auth.js'
-import { ResolverService } from './services/resolver.js'
 import { ProjectService } from './services/project.js'
 import { SessionService } from './services/session.js'
 import { ApprovalService } from './services/approval.js'
@@ -87,7 +86,6 @@ export class NavisDaemon {
     this.sessionService = null
     this.approvalService = null
     this.pairingService = null
-    this.resolverService = null
 
     // mDNS service
     this.mdnsService = null
@@ -207,10 +205,6 @@ export class NavisDaemon {
     if (!existsSync(dataDir)) {
       mkdirSync(dataDir, { recursive: true })
     }
-
-    // Initialize resolver service first
-    this.resolverService = new ResolverService()
-    await this.resolverService.initialize()
 
     // Initialize all services
     this.projectService = new ProjectService()

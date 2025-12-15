@@ -2,6 +2,7 @@
 
 import { program } from 'commander'
 import {
+  setupCommand,
   upCommand,
   downCommand,
   statusCommand,
@@ -10,6 +11,7 @@ import {
   scanCommand,
   indexCommand,
   pairCommand,
+  resetCommand,
 } from './commands.js'
 
 // CLI configuration
@@ -19,6 +21,11 @@ program
   .version('0.1.0')
 
 // Commands
+program
+  .command('setup')
+  .description('One-time setup for clean https://navis.local LAN access')
+  .action(setupCommand)
+
 program
   .command('up')
   .description('Start the Navis daemon')
@@ -62,6 +69,11 @@ program
   .description('Initiate device pairing for Navis')
   .option('-r, --re-pair', 'Force re-pairing of all devices')
   .action(pairCommand)
+
+program
+  .command('reset')
+  .description('Reset local Navis setup (bridge/mDNS/certs)')
+  .action(resetCommand)
 
 // Parse command line arguments
 program.parse()
