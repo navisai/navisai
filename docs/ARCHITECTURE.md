@@ -81,14 +81,20 @@ CLI communicates with daemon via HTTP on local loopback.
 ---
 
 ## 2.3 PWA UI  
-### ⚡ **Updated with Chosen Starter Template**
+### ⚡ **Updated with Chosen Starter Template + Tailwind v4**
 
 **Location:** `apps/pwa`  
 **Framework:** **SvelteKit**  
 **Starter:** **vite-pwa-sveltekit (Vite Plugin PWA + SvelteKit)**  
 Repo: https://github.com/vite-pwa/sveltekit
 
-### Why This Starter?
+**Styling System:** **Tailwind CSS v4**
+- Custom configuration with Navis brand design tokens
+- Pre-configured color system, typography, spacing, and animations
+- Brand-aligned components and utilities in `src/app.css`
+- See `BRAND_SPEC.md` for detailed styling guidelines
+
+### Why This Starter + Tailwind?
 
 1. **Battle-tested**: SvelteKit + Vite + vite-pwa is the most stable path for PWAs in 2025.
 2. **Full offline support**: Service worker, caching, app shell.

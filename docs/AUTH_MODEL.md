@@ -7,7 +7,7 @@ Status: Draft (MVP)
 
 ## 1. Goals
 
-- Authenticate **trusted devices** (PWA clients) to the daemon over HTTPS.
+- Authenticate **trusted devices** (SvelteKit PWA clients built with Tailwind CSS v4) to the daemon over HTTPS.
 - Require **pairing** before access.
 - Protect local API from other devices on LAN.
 - Keep implementation simple enough for MVP (no PKI requirement).

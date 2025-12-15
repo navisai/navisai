@@ -1,7 +1,7 @@
 # Navis AI — IPC & Transport Specification
 
 Version: v0.1  
-Scope: Daemon ⇄ CLI ⇄ PWA communications
+Scope: Daemon ⇄ CLI ⇄ PWA (SvelteKit + Tailwind CSS v4) communications
 
 ---
 

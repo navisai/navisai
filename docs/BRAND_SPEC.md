@@ -3,6 +3,10 @@
 This document defines the **visual, tonal, motion, and UX foundations** for Navis AI across all surfaces (PWA, desktop, docs, CLI, and state illustrations).  
 It is intended to stay stable long-term and guide all contributors.
 
+> **Note**: All styling should be implemented using **Tailwind CSS v4** with the configuration defined in `apps/pwa/tailwind.config.js`. Design tokens are pre-configured and should be used consistently across all components.
+> 
+> **Code Formatting**: Use `pnpm format` to format all code. Prettier will automatically sort Tailwind CSS classes according to the recommended order.
+
 ---
 
 # 1. Brand Positioning
@@ -67,6 +71,11 @@ Use for:
 - Medium (500) – subheaders  
 - SemiBold (600) – section titles  
 
+**Tailwind Implementation**: 
+- Pre-installed via `@fontsource/source-sans-3`
+- Use `font-sans` class with `font-medium` or `font-semibold` utilities
+- See `src/app.css` for font imports
+
 ### Monospace (Terminal / Logs)
 **JetBrains Mono**
 
@@ -75,6 +84,11 @@ Use for:
 - hashes  
 - code  
 - logs  
+
+**Tailwind Implementation**:
+- Pre-installed via `@fontsource/jetbrains-mono`
+- Use `font-mono` class
+- See `src/app.css` for font imports  
 
 ### Rules
 - No decorative fonts  
@@ -89,14 +103,28 @@ Use for:
 ### Base Unit
 **8px** — all spacing must be multiples.
 
+**Tailwind Implementation**:
+- All spacing utilities available in `tailwind.config.js`
+- Use `p-4` (16px), `p-6` (24px), `p-8` (32px) for padding
+- Use `m-4` (16px), `m-6` (24px), `m-8` (32px) for margins
+
 ### Global Padding
 - Mobile page padding: **16px**  
 - Desktop page padding: **24–32px**
 
+**Tailwind Implementation**:
+- Use `.page-padding` utility class (defined in `src/app.css`)
+- Automatically responsive: `px-4 md:px-6 lg:px-8`
+
 ### Vertical Rhythm
 - Section spacing: **32–48px**  
 - Within related groups: **16px**  
-- Tight groupings: **8px**  
+- Tight groupings: **8px**
+
+**Tailwind Implementation**:
+- Section: `.section-spacing` utility class (`my-8 md:my-12`)
+- Groups: `.group-spacing` utility class (`my-4`)
+- Tight: `.tight-spacing` utility class (`my-2`)  
 
 ### Panels & Cards
 - Panel padding: 16px (mobile), 24px (desktop)  
@@ -185,10 +213,21 @@ Motion must serve clarity, not decoration.
 - Micro transitions: **120–180ms**  
 - State transitions: **240–320ms**
 
+**Tailwind Implementation**:
+- Pre-defined animations in `tailwind.config.js`:
+  - `animate-micro-in/out` (120ms)
+  - `animate-state-in/out` (240ms)  
+  - `animate-panel-in/out` (320ms)
+- Custom durations: `duration-150`, `duration-200`, `duration-300`
+
 ### Easing
 - `ease-in-out` only  
 - No bounce  
-- No elastic curves  
+- No elastic curves
+
+**Tailwind Implementation**:
+- Use `ease-in-out` transition class
+- All predefined animations use correct easing  
 
 ### Allowed motion (MVP)
 - Opacity + translate only  

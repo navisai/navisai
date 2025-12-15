@@ -40,6 +40,18 @@ pnpm dev
 - All database operations must use `@navisai/db` repositories
 - Write small, modular commit messages
 
+### Frontend Development
+- **Styling**: All UI components must use Tailwind CSS v4
+- **Design Tokens**: Use the pre-configured design system in `apps/pwa/tailwind.config.js`
+- **Brand Guidelines**: Follow `BRAND_SPEC.md` for all visual decisions
+- **Code Formatting**: Run `pnpm format` before submitting PRs
+- **Typography**: Use Source Sans 3 for UI text, JetBrains Mono for code/terminal display
+
+### Code Quality
+- All code must be formatted with Prettier
+- Tailwind classes will be automatically sorted
+- Use `pnpm format:check` to verify formatting before commits
+
 ---
 
 ## 4. Pull Requests

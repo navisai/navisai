@@ -6,7 +6,7 @@ Version: v0.1
 
 ## 1. Goals
 
-- Provide consistent logging across daemon, CLI, PWA server-side code, and plugins.
+- Provide consistent logging across daemon, CLI, PWA (SvelteKit with Tailwind CSS v4) server-side code, and plugins.
 - Make logs easy to read in development.
 - Provide structured logs for future analysis.
 - Avoid leaking secrets.

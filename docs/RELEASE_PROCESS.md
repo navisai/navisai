@@ -84,10 +84,11 @@ PWA (`apps/pwa`) and daemon (`apps/daemon`) are primarily distributed as part of
 
    Later we can adopt Changesets.
 
-4. **Build**
+4. **Format & Build**
 
    ```bash
-   pnpm build
+   pnpm format:check  # Verify formatting
+   pnpm build         # Build all packages
    ```
 
 5. **Login and publish**

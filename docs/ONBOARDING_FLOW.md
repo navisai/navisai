@@ -59,7 +59,7 @@ User sees:
 - readiness indicators
 
 ### 3.7 Install PWA
-Offer installation for mobile.
+Offer installation for mobile. The PWA is built with SvelteKit and styled with Tailwind CSS v4 following the Navis brand guidelines.
 
 ---
 

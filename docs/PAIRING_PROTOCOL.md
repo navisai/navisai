@@ -7,7 +7,7 @@ Status: Draft (MVP-aligned)
 
 ## 1. Goals
 
-The pairing protocol defines how a **Navis client** (PWA on phone/desktop) is securely linked to a **Navis daemon** running on a local machine.
+The pairing protocol defines how a **Navis client** (SvelteKit PWA built with Tailwind CSS v4, running on phone/desktop) is securely linked to a **Navis daemon** running on a local machine.
 
 Goals:
 

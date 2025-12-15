@@ -78,6 +78,17 @@ These rules **override** any permissive defaults in Global AGENTS.md:
   - JavaScript + JSDoc preferred
   - TypeScript only when localized and justified
 
+**Styling framework**:
+  - Tailwind CSS v4 is required for all UI components
+  - Use design tokens from `apps/pwa/tailwind.config.js`
+  - Follow brand guidelines in `BRAND_SPEC.md`
+
+**Code formatting**:
+  - Prettier is required for code formatting
+  - Tailwind CSS classes are automatically sorted by prettier-plugin-tailwindcss
+  - Use `pnpm format` to format all files
+  - Use `pnpm format:check` to verify formatting before commits
+
 Agents must not introduce alternative package managers or global installs.
 
 ---
@@ -100,6 +111,12 @@ pnpm --filter <pkg> <command>
 ### PWA dev (if applicable)
 ```bash
 pnpm --filter @navisai/pwa dev
+```
+
+### Formatting
+```bash
+pnpm format              # Format all files
+pnpm format:check        # Check formatting without modifying
 ```
 
 ---
