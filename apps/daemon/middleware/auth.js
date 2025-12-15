@@ -1,111 +1,15 @@
+import {
+  parseAuthHeader,
+  createCanonicalString,
+  computeBodyHash,
+  verifySignature,
+  checkReplay,
+  isTimestampValid,
+} from '../auth/utils.js'
+
 /**
  * Authentication Middleware
  * Implements HMAC-based request signing as per AUTH_MODEL.md
- */
-
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-
-const MAX_TIMESTAMP_SKEW_MS = 5 * 60 * 1000 // 5 minutes
-const NONCE_CACHE = new Map() // Simple replay protection
-
-/**
- * Parse Authorization header
- * Format: Navis deviceId="<id>",signature="<base64>",timestamp="<iso8601>"
- */
-function parseAuthHeader(authHeader) {
-  if (!authHeader || !authHeader.startsWith('Navis ')) {
-    return null
-  }
-
-  const authPart = authHeader.slice(6) // Remove 'Navis '
-  const parts = authPart.split(',')
-
-  const result = {}
-  for (const part of parts) {
-    const [key, ...valueParts] = part.split('=')
-    if (valueParts.length === 0) continue
-
-    let value = valueParts.join('=')
-    if (value.startsWith('"') && value.endsWith('"')) {
-      value = value.slice(1, -1)
-    }
-
-    result[key.trim()] = value
-  }
-
-  if (!result.deviceId || !result.signature || !result.timestamp) {
-    return null
-  }
-
-  return result
-}
-
-/**
- * Create canonical string for HMAC
- */
-function createCanonicalString(method, path, bodyHash, timestamp) {
-  return `${method}\n${path}\n${bodyHash}\n${timestamp}`
-}
-
-/**
- * Compute body hash
- */
-function computeBodyHash(body) {
-  if (!body || body === '') {
-    return ''
-  }
-  return createHash('sha256').update(body).digest('hex')
-}
-
-/**
- * Verify HMAC signature
- */
-function verifySignature(canonicalString, signature, deviceSecret) {
-  try {
-    const expectedSignature = createHmac('sha256', deviceSecret)
-      .update(canonicalString)
-      .digest('base64')
-
-    // Constant-time comparison
-    const expectedBuf = Buffer.from(expectedSignature, 'base64')
-    const actualBuf = Buffer.from(signature, 'base64')
-
-    if (expectedBuf.length !== actualBuf.length) {
-      return false
-    }
-
-    return timingSafeEqual(expectedBuf, actualBuf)
-  } catch (error) {
-    return false
-  }
-}
-
-/**
- * Check for replay attacks
- */
-function checkReplay(deviceId, signature, timestamp) {
-  const key = `${deviceId}:${signature}`
-  const existing = NONCE_CACHE.get(key)
-
-  if (existing && (timestamp - existing) < MAX_TIMESTAMP_SKEW_MS) {
-    return false // Replay detected
-  }
-
-  NONCE_CACHE.set(key, timestamp)
-
-  // Clean old entries
-  const cutoff = Date.now() - MAX_TIMESTAMP_SKEW_MS * 2
-  for (const [cacheKey, cacheTime] of NONCE_CACHE.entries()) {
-    if (cacheTime < cutoff) {
-      NONCE_CACHE.delete(cacheKey)
-    }
-  }
-
-  return true
-}
-
-/**
- * Authentication middleware factory
  */
 export function createAuthMiddleware(dbManager) {
   return async function authMiddleware(request, reply) {
@@ -122,10 +26,7 @@ export function createAuthMiddleware(dbManager) {
       return
     }
 
-    // Parse Authorization header
-    const authHeader = request.headers.authorization
-    const auth = parseAuthHeader(authHeader)
-
+    const auth = parseAuthHeader(request.headers.authorization)
     if (!auth) {
       reply.code(401).send({
         error: 'Invalid or missing authorization header',
@@ -135,12 +36,7 @@ export function createAuthMiddleware(dbManager) {
     }
 
     const { deviceId, signature, timestamp } = auth
-
-    // Validate timestamp
-    const requestTime = new Date(timestamp).getTime()
-    const now = Date.now()
-
-    if (isNaN(requestTime) || Math.abs(now - requestTime) > MAX_TIMESTAMP_SKEW_MS) {
+    if (!isTimestampValid(timestamp)) {
       reply.code(401).send({
         error: 'Timestamp outside valid range',
         code: 'INVALID_TIMESTAMP'
@@ -149,7 +45,6 @@ export function createAuthMiddleware(dbManager) {
     }
 
     try {
-      // Look up device in database
       const device = await dbManager.query(
         'SELECT id, secretHash, isRevoked FROM devices WHERE id = ?',
         [deviceId]
@@ -171,19 +66,19 @@ export function createAuthMiddleware(dbManager) {
         return reply.hijack()
       }
 
-      // For MVP, we'll assume the secretHash is actually the raw secret
-      // In production, this should be a proper hash
       const deviceSecret = device[0].secretHash
-
-      // Compute canonical string
       const method = request.method
       const url = new URL(request.url, `https://${request.headers.host}`)
       const path = url.pathname + url.search
-      const body = request.body || ''
-      const bodyHash = computeBodyHash(typeof body === 'string' ? body : JSON.stringify(body))
+      const bodyPayload =
+        request.body === undefined || request.body === null
+          ? ''
+          : typeof request.body === 'string'
+            ? request.body
+            : JSON.stringify(request.body)
+      const bodyHash = computeBodyHash(bodyPayload)
       const canonicalString = createCanonicalString(method, path, bodyHash, timestamp)
 
-      // Verify signature
       if (!verifySignature(canonicalString, signature, deviceSecret)) {
         reply.code(401).send({
           error: 'Invalid signature',
@@ -192,7 +87,7 @@ export function createAuthMiddleware(dbManager) {
         return reply.hijack()
       }
 
-      // Check for replay
+      const requestTime = Date.parse(timestamp)
       if (!checkReplay(deviceId, signature, requestTime)) {
         reply.code(401).send({
           error: 'Replay detected',
@@ -201,18 +96,15 @@ export function createAuthMiddleware(dbManager) {
         return reply.hijack()
       }
 
-      // Attach device info to request
       request.device = {
         id: deviceId,
-        authenticated: true
+        authenticated: true,
       }
 
-      // Update last seen
       await dbManager.execute(
         'UPDATE devices SET lastSeenAt = ? WHERE id = ?',
         [new Date().toISOString(), deviceId]
       )
-
     } catch (error) {
       console.error('Authentication error:', error)
       reply.code(500).send({

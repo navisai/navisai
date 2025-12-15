@@ -138,7 +138,7 @@ export class NavisDaemon {
       await this.setupRoutes()
 
       // Setup WebSocket
-      this.wsManager = new WebSocketManager(this.fastify)
+      this.wsManager = new WebSocketManager(this.fastify, this.dbManager)
       await this.wsManager.initialize()
       this.approvalService?.setWebSocketManager(this.wsManager)
 
