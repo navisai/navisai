@@ -1,0 +1,14 @@
+
+node_modules/
+dist/
+build/
+.svelte-kit/
+.pnpm-store/
+.env
+.env.*
+.navis/
+*.sqlite
+.DS_Store
+pro/
+premium/
+enterprise/

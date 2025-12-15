@@ -1,0 +1,9 @@
+{
+  "name": "@navisai/cli",
+  "version": "0.1.0",
+  "private": false,
+  "bin": {
+    "navisai": "src/index.js"
+  },
+  "type": "module"
+}

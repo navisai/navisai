@@ -1,0 +1,11 @@
+{
+  "name": "@navisai/db",
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "drizzle-orm": "^0.30.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^9.4.0"
+  }
+}

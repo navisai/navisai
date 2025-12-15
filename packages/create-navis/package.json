@@ -1,0 +1,9 @@
+{
+  "name": "create-navis",
+  "version": "0.1.0",
+  "description": "Bootstrap a NavisAI environment",
+  "bin": {
+    "create-navis": "src/index.js"
+  },
+  "type": "module"
+}
