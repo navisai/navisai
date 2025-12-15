@@ -6,11 +6,14 @@
  */
 
 import Fastify from 'fastify'
-import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, networkInterfaces } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import multicastDns from 'multicast-dns'
+import fastifyStatic from '@fastify/static'
+import { NAVIS_PATHS } from '@navisai/api-contracts'
+import dbManager from '@navisai/db'
 // Local config for now
 const DEFAULT_CONFIG = {
   daemon: {
@@ -59,6 +62,7 @@ export class NavisDaemon {
     this.fastify = null
     this.sslManager = new SSLManager()
     this.wsManager = null
+    this.dbManager = null
     this.config = {
       get: (key) => {
         let obj = DEFAULT_CONFIG
@@ -86,8 +90,20 @@ export class NavisDaemon {
     this.approvalService = null
     this.pairingService = null
 
-    // mDNS service
-    this.mdnsService = null
+    // mDNS responder
+    this.mdns = null
+  }
+
+  getLanAddress() {
+    const interfaces = networkInterfaces()
+    for (const addrs of Object.values(interfaces)) {
+      for (const addr of addrs || []) {
+        if (addr && addr.family === 'IPv4' && addr.internal === false) {
+          return addr.address
+        }
+      }
+    }
+    return null
   }
 
   async start() {
@@ -137,7 +153,6 @@ export class NavisDaemon {
       console.log(`\n✅ Navis daemon is running!`)
       console.log(`📱 Onboarding: https://navis.local/welcome`)
       console.log(`📊 Status: https://navis.local/status`)
-
     } catch (error) {
       console.error('\n❌ Failed to start daemon:', error.message)
       throw error
@@ -150,6 +165,10 @@ export class NavisDaemon {
     if (!existsSync(dataDir)) {
       mkdirSync(dataDir, { recursive: true })
     }
+
+    // Initialize database (required)
+    await dbManager.initialize()
+    this.dbManager = dbManager
 
     // Initialize all services
     this.projectService = new ProjectService()
@@ -171,132 +190,138 @@ export class NavisDaemon {
     this.fastify.addHook('preHandler', authMiddleware)
 
     // Public endpoints (no auth required)
-    this.fastify.get('/welcome', this.getWelcomeHandler.bind(this))
-    this.fastify.get('/status', this.getStatusHandler.bind(this))
-    this.fastify.post('/pairing/request', this.pairingService.handleRequest.bind(this.pairingService))
+    this.fastify.get(NAVIS_PATHS.status, this.getStatusHandler.bind(this))
+    this.fastify.post(NAVIS_PATHS.pairing.request, this.pairingService.handleRequest.bind(this.pairingService))
 
     // Auth-required endpoints (will add middleware)
-    this.fastify.get('/projects', this.getProjectsHandler.bind(this))
+    this.fastify.get(NAVIS_PATHS.projects.list, this.getProjectsHandler.bind(this))
     this.fastify.get('/projects/:id', this.getProjectHandler.bind(this))
-    this.fastify.get('/sessions', this.getSessionsHandler.bind(this))
-    this.fastify.get('/approvals', this.getApprovalsHandler.bind(this))
-    this.fastify.get('/approvals/pending', this.getPendingApprovalsHandler.bind(this))
+    this.fastify.get(NAVIS_PATHS.sessions, this.getSessionsHandler.bind(this))
+    this.fastify.get(NAVIS_PATHS.approvals.list, this.getApprovalsHandler.bind(this))
+    this.fastify.get(NAVIS_PATHS.approvals.pending, this.getPendingApprovalsHandler.bind(this))
     this.fastify.post('/approvals/:id/approve', this.approveHandler.bind(this))
     this.fastify.post('/approvals/:id/reject', this.rejectHandler.bind(this))
 
     // Device management
-    this.fastify.get('/devices', this.getDevicesHandler.bind(this))
+    this.fastify.get(NAVIS_PATHS.devices.list, this.getDevicesHandler.bind(this))
     this.fastify.post('/devices/:id/revoke', this.revokeDeviceHandler.bind(this))
 
     // Discovery endpoints
-    this.fastify.post('/discovery/scan', this.scanHandler.bind(this))
-    this.fastify.post('/discovery/index', this.indexHandler.bind(this))
+    this.fastify.post(NAVIS_PATHS.discovery.scan, this.scanHandler.bind(this))
+    this.fastify.post(NAVIS_PATHS.discovery.index, this.indexHandler.bind(this))
 
     // Logs endpoint
     this.fastify.get('/logs', this.getLogsHandler.bind(this))
 
     // Pairing QR endpoint
     this.fastify.get('/pairing/qr', this.getPairingQRHandler.bind(this))
+
+    const pwaRoot = join(__dirname, '..', 'pwa', 'build')
+    const pwaIndex = join(pwaRoot, 'index.html')
+
+    if (existsSync(pwaIndex)) {
+      this.fastify.register(fastifyStatic, {
+        root: pwaRoot,
+        prefix: '/',
+      })
+
+      this.fastify.setNotFoundHandler((request, reply) => {
+        if (request.method === 'GET') {
+          return reply.sendFile('index.html')
+        }
+        reply.code(404).send({ error: 'Not found' })
+      })
+    } else {
+      this.fastify.get(NAVIS_PATHS.welcome, async () => {
+        return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NavisAI</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#f8fafc; margin:0; }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 32px 16px; }
+      .card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1 style="margin:0 0 8px;">NavisAI</h1>
+        <p style="margin:0 0 12px; color:#475569;">PWA assets are not present yet.</p>
+        <p style="margin:0 0 12px; color:#475569;">Build the PWA and restart the daemon:</p>
+        <pre style="margin:0; padding:12px; background:#f1f5f9; border-radius:10px;"><code>pnpm --filter @navisai/pwa build
+pnpm --filter @navisai/daemon dev</code></pre>
+      </div>
+    </div>
+  </body>
+</html>`
+      })
+    }
   }
 
   async setupMDNS() {
     try {
-      const { default: bonjour } = await import('bonjour-service')
+      const ip = this.getLanAddress()
+      if (!ip) {
+        console.log('⚠️  mDNS not started: no LAN IPv4 address detected')
+        return
+      }
 
-      this.mdnsService = bonjour().publish({
-        name: 'NavisAI',
-        type: 'https',
-        port: this.config.get('daemon.port'),
-        txt: {
-          path: '/welcome',
-          version: '0.1.0'
+      const port = 443
+      this.mdns = multicastDns()
+
+      this.mdns.on('query', (query) => {
+        const questions = query.questions || []
+        for (const q of questions) {
+          if (q.name === 'navis.local' && q.type === 'A') {
+            this.mdns.respond({
+              answers: [{ name: 'navis.local', type: 'A', ttl: 120, data: ip }],
+            })
+          }
         }
       })
 
-      console.log('🔍 mDNS service announced')
+      this.mdns.respond({
+        answers: [
+          {
+            name: '_navisai._tcp.local',
+            type: 'PTR',
+            data: 'NavisAI._navisai._tcp.local',
+            ttl: 120,
+          },
+          {
+            name: 'NavisAI._navisai._tcp.local',
+            type: 'SRV',
+            data: { port, weight: 0, priority: 10, target: 'navis.local' },
+            ttl: 120,
+          },
+          {
+            name: 'NavisAI._navisai._tcp.local',
+            type: 'TXT',
+            data: ['version=1', 'tls=1', 'origin=https://navis.local'],
+            ttl: 120,
+          },
+          { name: 'navis.local', type: 'A', ttl: 120, data: ip },
+        ],
+      })
+
+      console.log('🔍 mDNS active for navis.local', { ip })
     } catch (error) {
       console.log('⚠️  mDNS not available:', error.message)
     }
   }
 
   // Route handlers
-  async getWelcomeHandler(request, reply) {
-    reply.type('text/html')
-
-    // Get pairing data for QR code
-    const pairingData = this.pairingService ? await this.pairingService.generatePairingData() : null
-
-    return `<!DOCTYPE html>
-<html>
-<head>
-    <title>NavisAI - Welcome</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #f8fafc; margin: 0; }
-      .container { max-width: 880px; margin: 0 auto; padding: 32px 16px; }
-      .card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 10px rgba(15,23,42,0.06); border: 1px solid #e2e8f0; }
-      .title { font-size: 28px; font-weight: 700; color: #0f172a; margin: 0 0 6px; }
-      .muted { color: #475569; margin: 0 0 18px; }
-      .row { display: grid; grid-template-columns: 1fr; gap: 16px; }
-      @media (min-width: 768px) { .row { grid-template-columns: 1fr 1fr; } }
-      .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #ecfeff; color: #0f766e; font-weight: 600; font-size: 12px; }
-      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-      img { max-width: 100%; height: auto; border-radius: 10px; }
-      a { color: #0ea5e9; text-decoration: none; }
-      a:hover { text-decoration: underline; }
-      .subcard { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-      <div class="card">
-        <div class="badge">Onboarding</div>
-        <h1 class="title">NavisAI is running</h1>
-        <p class="muted">Open this page on your phone to pair, or scan the QR code.</p>
-
-        <div class="row">
-          <div class="subcard">
-            <h2 style="margin:0 0 8px; font-size:16px;">Scan QR</h2>
-            ${pairingData ? `<img src="/pairing/qr" alt="Pairing QR Code" />` : `<p class="muted">Generating...</p>`}
-            ${pairingData ? `<p class="muted" style="margin-top:10px; font-size:12px;">Code: <span class="mono">${pairingData.id.toUpperCase()}</span></p>` : ``}
-          </div>
-          <div class="subcard">
-            <h2 style="margin:0 0 8px; font-size:16px;">Open on phone</h2>
-            <p class="muted" style="margin-bottom:10px;">Visit:</p>
-            <div class="mono"><a href="https://navis.local/welcome">https://navis.local/welcome</a></div>
-            <p class="muted" style="margin-top:10px; font-size:12px;">If prompted, accept the local certificate.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <script>
-        // Auto-refresh QR code and pairing status
-        setInterval(async () => {
-            try {
-                const response = await fetch('/status')
-                const status = await response.json()
-
-                // Update UI based on pairing status
-                if (status.paired) {
-                    window.location.href = '/'
-                }
-            } catch (error) {
-                console.error('Failed to check status:', error)
-            }
-        }, 5000)
-    </script>
-</body>
-</html>`
-  }
-
   async getStatusHandler(request, reply) {
+    const db = this.dbManager ? await this.dbManager.healthCheck() : { available: false }
     return {
       status: 'running',
       version: '0.1.0',
       timestamp: new Date().toISOString(),
-      database: true,
+      database: db.available,
       paired: this.pairingService ? await this.pairingService.hasPairedDevices() : false,
       endpoints: this.config.get('api.endpoints')
     }
@@ -436,8 +461,9 @@ export class NavisDaemon {
   async stop() {
     console.log('\n🛑 Stopping Navis daemon...')
 
-    if (this.mdnsService) {
-      this.mdnsService.stop()
+    if (this.mdns) {
+      this.mdns.destroy()
+      this.mdns = null
     }
 
     if (this.wsManager) {
@@ -445,6 +471,11 @@ export class NavisDaemon {
     }
 
     if (this.fastify) await this.fastify.close()
+
+    if (this.dbManager) {
+      await this.dbManager.close()
+      this.dbManager = null
+    }
 
     this.isRunning = false
     console.log('✅ Daemon stopped')

@@ -3,8 +3,9 @@ import { promisify } from 'node:util'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { homedir } from 'node:os'
+import { homedir, platform } from 'node:os'
 import { createRequire } from 'node:module'
+import readline from 'node:readline/promises'
 import { NAVIS_PATHS } from '@navisai/api-contracts'
 
 const execAsync = promisify(exec)
@@ -21,6 +22,106 @@ function resolveDaemonEntrypoint() {
   }
 }
 
+function resolveBridgeEntrypoint() {
+  try {
+    return require.resolve('@navisai/daemon/src/bridge.js')
+  } catch {
+    return path.join(__dirname, '..', '..', 'daemon', 'src', 'bridge.js')
+  }
+}
+
+async function confirm(question) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+  try {
+    const answer = await rl.question(`${question} (y/N): `)
+    return answer.trim().toLowerCase() === 'y'
+  } finally {
+    rl.close()
+  }
+}
+
+function escapeAppleScriptString(value) {
+  return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
+}
+
+async function runMacOSAdminShell(shellCommand) {
+  const script = `do shell script "${escapeAppleScriptString(shellCommand)}" with administrator privileges`
+  return execAsync(`osascript -e "${escapeAppleScriptString(script)}"`)
+}
+
+async function installMacOSBridge() {
+  const bridgeEntrypoint = resolveBridgeEntrypoint()
+  const nodePath = process.execPath
+
+  const localDir = path.join(homedir(), '.navis', 'bridge')
+  const localPlist = path.join(localDir, 'com.navisai.bridge.plist')
+  const systemPlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
+
+  await fs.mkdir(localDir, { recursive: true })
+
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.navisai.bridge</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>${nodePath}</string>
+      <string>${bridgeEntrypoint}</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>NAVIS_BRIDGE_HOST</key>
+      <string>0.0.0.0</string>
+      <key>NAVIS_BRIDGE_PORT</key>
+      <string>443</string>
+      <key>NAVIS_DAEMON_HOST</key>
+      <string>127.0.0.1</string>
+      <key>NAVIS_DAEMON_PORT</key>
+      <string>47621</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/navis-bridge.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/navis-bridge.err</string>
+  </dict>
+</plist>
+`
+
+  await fs.writeFile(localPlist, plist, 'utf8')
+
+  const shellCommand = [
+    'set -euo pipefail',
+    `install -m 0644 "${localPlist}" "${systemPlist}"`,
+    `launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true`,
+    `launchctl bootstrap system "${systemPlist}"`,
+    `launchctl enable system/com.navisai.bridge >/dev/null 2>&1 || true`,
+    `launchctl kickstart -k system/com.navisai.bridge >/dev/null 2>&1 || true`,
+  ].join('; ')
+
+  await runMacOSAdminShell(shellCommand)
+}
+
+async function uninstallMacOSBridge() {
+  const systemPlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
+  const shellCommand = [
+    'set -euo pipefail',
+    `launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true`,
+    `rm -f "${systemPlist}"`,
+  ].join('; ')
+
+  await runMacOSAdminShell(shellCommand)
+}
+
 export async function setupCommand() {
   console.log('NavisAI Setup')
   console.log('=============\n')
@@ -29,15 +130,47 @@ export async function setupCommand() {
   console.log('- Navis Bridge (443 -> 47621)')
   console.log('- mDNS/Bonjour for navis.local on LAN')
   console.log('- TLS certificates and guided mobile trust\n')
-  console.log('Status: not implemented yet.')
-  console.log('See `docs/SETUP.md`.')
+
+  if (!(await confirm('Continue with setup?'))) {
+    console.log('Canceled.')
+    return
+  }
+
+  const os = platform()
+  if (os !== 'darwin') {
+    console.log('\nSetup is currently implemented for macOS only.')
+    console.log('See `docs/SETUP.md` for the cross-platform spec.')
+    return
+  }
+
+  console.log('\nInstalling the Navis Bridge (requires an OS admin prompt)...')
+  await installMacOSBridge()
+  console.log('✅ Bridge installed: https://navis.local will use port 443 (forwarded to the daemon).')
+  console.log('\nNext:')
+  console.log('- Start Navis: navisai up')
+  console.log(`- Open onboarding: ${CANONICAL_ORIGIN}${NAVIS_PATHS.welcome}`)
 }
 
 export async function resetCommand() {
   console.log('NavisAI Reset')
   console.log('=============\n')
-  console.log('Status: not implemented yet.')
-  console.log('See `docs/SETUP.md`.')
+  console.log('This will remove the OS bridge service and stop binding port 443.\n')
+
+  if (!(await confirm('Remove Navis Bridge and reset setup?'))) {
+    console.log('Canceled.')
+    return
+  }
+
+  const os = platform()
+  if (os !== 'darwin') {
+    console.log('\nReset is currently implemented for macOS only.')
+    console.log('See `docs/SETUP.md` for the cross-platform spec.')
+    return
+  }
+
+  console.log('Removing the Navis Bridge (requires an OS admin prompt)...')
+  await uninstallMacOSBridge()
+  console.log('✅ Bridge removed.')
 }
 
 export async function upCommand(options = {}) {

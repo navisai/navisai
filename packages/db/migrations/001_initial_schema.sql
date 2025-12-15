@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS devices (
   id TEXT PRIMARY KEY,
   name TEXT,
   publicKey TEXT,
+  secretHash TEXT,
   pairedAt TEXT,
   lastSeenAt TEXT,
   isRevoked INTEGER DEFAULT 0

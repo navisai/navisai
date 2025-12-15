@@ -4,7 +4,6 @@
  */
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
 
 const MAX_TIMESTAMP_SKEW_MS = 5 * 60 * 1000 // 5 minutes
 const NONCE_CACHE = new Map() // Simple replay protection
@@ -110,15 +109,16 @@ function checkReplay(deviceId, signature, timestamp) {
  */
 export function createAuthMiddleware(dbManager) {
   return async function authMiddleware(request, reply) {
-    // Skip auth for public endpoints
-    const publicPaths = [
-      '/welcome',
-      '/status',
-      '/pairing/request',
-      '/pairing/qr'
+    const protectedPrefixes = [
+      '/projects',
+      '/sessions',
+      '/approvals',
+      '/devices',
+      '/discovery',
+      '/logs',
     ]
 
-    if (publicPaths.some(path => request.url.startsWith(path))) {
+    if (!protectedPrefixes.some(prefix => request.url.startsWith(prefix))) {
       return
     }
 

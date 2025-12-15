@@ -60,6 +60,11 @@ Recommended OS integrations:
 - Linux: systemd socket activation
 - Windows: service
 
+Current implementation status:
+
+- macOS: implemented via a `launchd` LaunchDaemon (`com.navisai.bridge`) that runs `navisai-bridge` and binds 443 (admin prompt required once).
+- Linux/Windows: not implemented yet (spec-only).
+
 ### 3.2 mDNS/Bonjour for `navis.local`
 
 Requirements:
@@ -73,6 +78,7 @@ Notes:
 
 - Do not use hosts-file strategies for LAN/phone access.
 - Conflicts must be detected (if another host claims `navis.local`, setup must fail with actionable guidance).
+- Implementation note (v0.1): mDNS advertisement is provided by the daemon at runtime; `navisai setup` is responsible for enabling the bridge and can add diagnostics later to confirm mDNS behavior.
 
 ### 3.3 Certificates and trust
 
@@ -81,6 +87,7 @@ Requirements:
 - The daemon serves HTTPS with a certificate valid for `navis.local`.
 - Setup generates and stores cert material under `~/.navis/certs/` (layout defined by implementation).
 - On iOS, users must perform an explicit one-time trust action. Setup/onboarding must guide this.
+- Implementation note (v0.1): certificate generation happens automatically on first daemon startup; `navisai setup` may later pre-generate and export trust material for mobile.
 
 Minimum acceptable onboarding UX:
 
@@ -124,4 +131,3 @@ Open onboarding:
 - remove local certificates (optional, with explicit confirmation)
 
 Reset must never silently delete user data without approval.
-

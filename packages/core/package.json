@@ -1,7 +1,7 @@
 {
   "name": "@navisai/core",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "main": "config.js",
   "exports": {

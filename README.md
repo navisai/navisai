@@ -113,12 +113,19 @@ Start daemon + PWA together:
 pnpm dev
 ```
 
-The PWA is served by the daemon (no separate PWA dev server in the canonical architecture).
-Build the PWA and run the daemon:
+The PWA is served by the daemon (no separate PWA dev server in the canonical architecture). `pnpm dev` builds the PWA then starts the daemon.
+
+You can also run the explicit commands:
 
 ```
 pnpm --filter @navisai/pwa build
 pnpm --filter @navisai/daemon dev
+```
+
+Optional: standalone PWA dev server (not the canonical architecture):
+
+```
+pnpm dev:standalone-pwa
 ```
 
 ---

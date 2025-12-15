@@ -50,6 +50,9 @@ OS integration:
 - Linux: systemd socket activation (recommended)
 - Windows: service (recommended)
 
+Implementation note:
+- v0.1 implements the bridge as a small TCP passthrough process (`navisai-bridge`). On macOS it is installed as a `launchd` LaunchDaemon via `navisai setup`.
+
 ### 3.3 mDNS/Bonjour (LAN name resolution + discovery)
 
 - Ensures `navis.local` resolves on the LAN to the host machine’s LAN IP.

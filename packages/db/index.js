@@ -8,6 +8,8 @@ import { createClient } from '@libsql/client'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
+import { readFile, readdir } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import * as schema from './schema.js'
 import { logger } from '@navisai/logging'
 
@@ -72,15 +74,70 @@ class DatabaseManager {
 
   async runMigrations() {
     try {
-      // Create tables directly from schema
-      // Note: In production, you'd want proper migration files
+      const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), 'migrations')
+      const entries = await readdir(migrationsDir, { withFileTypes: true })
+      const sqlFiles = entries
+        .filter(e => e.isFile() && e.name.endsWith('.sql'))
+        .map(e => e.name)
+        .sort()
 
-      // For now, let Drizzle handle schema creation
-      logger.info('Database migrations completed')
+      for (const file of sqlFiles) {
+        const sql = await readFile(join(migrationsDir, file), 'utf8')
+        await this.applySql(sql)
+      }
+
+      await this.ensureLegacyColumns()
+      logger.info('Database migrations completed', { count: sqlFiles.length })
     } catch (error) {
       logger.error('Failed to run migrations', { error: error.message })
       throw error
     }
+  }
+
+  async applySql(sql) {
+    const statements = sql
+      .split(';')
+      .map(s => s.trim())
+      .filter(Boolean)
+
+    for (const stmt of statements) {
+      await this.execute(`${stmt};`)
+    }
+  }
+
+  async ensureLegacyColumns() {
+    try {
+      await this.execute('ALTER TABLE devices ADD COLUMN secretHash TEXT;')
+    } catch {
+      // ignore: column exists or table missing (created by migrations)
+    }
+  }
+
+  async execute(sql, params = []) {
+    if (this.nativeDB) {
+      const statement = this.nativeDB.prepare(sql)
+      return statement.run(params)
+    }
+
+    if (this.client) {
+      return this.client.execute({ sql, args: params })
+    }
+
+    throw new Error('Database not initialized')
+  }
+
+  async query(sql, params = []) {
+    if (this.nativeDB) {
+      const statement = this.nativeDB.prepare(sql)
+      return statement.all(params)
+    }
+
+    if (this.client) {
+      const result = await this.client.execute({ sql, args: params })
+      return result.rows || []
+    }
+
+    throw new Error('Database not initialized')
   }
 
   async close() {

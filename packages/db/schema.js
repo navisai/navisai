@@ -51,6 +51,7 @@ export const devices = sqliteTable('devices', {
   id: text('id').primaryKey(),
   name: text('name'),
   publicKey: text('publicKey'),
+  secretHash: text('secretHash'),
   pairedAt: text('pairedAt'),
   lastSeenAt: text('lastSeenAt'),
   isRevoked: integer('isRevoked', { mode: 'boolean' }).default(false)

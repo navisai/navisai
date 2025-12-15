@@ -8,7 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "pnpm -r dev",
+    "dev": "pnpm --filter @navisai/pwa build && pnpm --filter @navisai/daemon dev",
+    "dev:standalone-pwa": "pnpm --filter @navisai/pwa dev:standalone",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "format": "pnpm -r format",

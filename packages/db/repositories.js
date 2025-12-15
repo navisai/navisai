@@ -204,6 +204,7 @@ export class DevicesRepository {
         id,
         name: data.name,
         publicKey: data.publicKey,
+        secretHash: data.secretHash,
         pairedAt: now,
         lastSeenAt: now,
         isRevoked: 0

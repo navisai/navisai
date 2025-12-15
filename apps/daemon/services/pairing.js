@@ -31,13 +31,11 @@ export class PairingService {
     })
 
     // Generate QR code image as data URL
-    // Port configuration follows IPC_TRANSPORT.md default
     const qrData = JSON.stringify({
       type: 'navis-pairing',
       version: 1,
-      host: 'navis.local',
-      port: process.env.NAVIS_PORT || 47621, // Use default from IPC_TRANSPORT.md
-      pairingToken: token
+      origin: 'https://navis.local',
+      pairingToken: token,
     })
 
     const qrImage = await QRCode.toDataURL(qrData, {
@@ -59,9 +57,7 @@ export class PairingService {
       name: 'NavisAI Pairing',
       type: 'navis-pairing',
       version: 1,
-      host: 'navis.local',
-      // Use default port from IPC_TRANSPORT.md:47621 (configurable)
-      port: process.env.NAVIS_PORT || 47621,
+      origin: 'https://navis.local',
       expires: new Date(Date.now() + 10 * 60 * 1000).toISOString() // 10 minutes
     }
 
