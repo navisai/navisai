@@ -36,7 +36,7 @@
     {#if approval}
       <div class="section-spacing">
         <div class="flex items-center gap-3 mb-6">
-          <a href="/" class="text-navy-600 hover:text-navy-800">
+          <a href="/" class="text-navy-600 hover:text-navy-800" aria-label="Go back to dashboard">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 stroke-linecap="round"

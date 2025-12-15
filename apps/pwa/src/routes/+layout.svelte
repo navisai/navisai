@@ -27,7 +27,12 @@
     <div class="bg-red-50 border-b border-red-200 px-4 py-2">
       <div class="max-w-4xl mx-auto flex items-center justify-between">
         <p class="text-red-700 text-sm">{$error}</p>
-        <button on:click={appStore.clearError} class="text-red-600 hover:text-red-800">
+        <button
+          onclick={appStore.clearError}
+          class="text-red-600 hover:text-red-800"
+          aria-label="Dismiss error message"
+          title="Dismiss"
+        >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               stroke-linecap="round"

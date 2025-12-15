@@ -181,11 +181,25 @@ Logs are part of the UX for a local control plane.
    - Keep changes focused
    - Respect daemon boundaries
 
-3. **Verify**
+3. **Lint Files & Remove Errors**
+   - Run `svelte-check` in apps/pwa directory: `pnpm check`
+   - Fix all TypeScript and Svelte-specific errors found
+   - Ensure no accessibility warnings
+
+4. **Format Files**
+   - Run `pnpm format` to format all files
+   - Verify with `pnpm format:check` if needed
+
+5. **Verify**
    - `pnpm install` succeeds cleanly
    - Touched apps still start/build
 
-4. **Document**
+6. **Create Detailed Commit**
+   - Include summary of changes
+   - List key features implemented
+   - Reference any issues or tasks
+
+7. **Document**
    - Update relevant docs if behavior or architecture changes
 
 ---

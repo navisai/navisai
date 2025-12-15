@@ -25,7 +25,7 @@ function createAppStore() {
     update(state => ({ ...state, connected: false }))
   })
 
-  apiClient.on('error', error => {
+  apiClient.on('error', (error: any) => {
     update(state => ({
       ...state,
       error: error.message || 'Connection error',

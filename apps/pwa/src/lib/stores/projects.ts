@@ -121,7 +121,7 @@ function createProjectsStore() {
   }
 
   // Listen for discovery updates from WebSocket
-  apiClient.on('discovery_completed', data => {
+  apiClient.on('discovery_completed', (data: any) => {
     update(state => ({
       ...state,
       scanning: false,

@@ -85,7 +85,7 @@ function createApprovalsStore() {
   }
 
   // Listen for approval updates from WebSocket
-  apiClient.on('approval_resolved', data => {
+  apiClient.on('approval_resolved', (data: any) => {
     removeApproval(data.approval.id)
   })
 

@@ -1,7 +1,7 @@
 <script>
 	import { onMount } from 'svelte'
 	import { appStore, daemonStatus, isConnected } from '$lib/stores/app'
-	import { projects, isLoadingProjects, isScanning, scanDirectory } from '$lib/stores/projects'
+	import { projectsStore, projects, isLoadingProjects, isScanning } from '$lib/stores/projects'
 	import { pendingApprovals } from '$lib/stores/approvals'
 
 	let scanPath = ''
@@ -11,7 +11,7 @@
 		if (!scanPath.trim()) return
 		scanningPath = scanPath
 		try {
-			await scanDirectory(scanPath.trim(), { depth: 3 })
+			await projectsStore.scanDirectory(scanPath.trim(), { depth: 3 })
 			scanPath = ''
 		} finally {
 			scanningPath = ''
@@ -20,7 +20,7 @@
 
 	async function handleQuickScan() {
 		const homeDir = '/Users/vsmith' // TODO: Get from API or browser
-		await scanDirectory(homeDir, { depth: 2 })
+		await projectsStore.scanDirectory(homeDir, { depth: 2 })
 	}
 </script>
 
