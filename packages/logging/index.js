@@ -72,3 +72,8 @@ export { Logger }
 export function log(level, message, meta) {
   return logger.log(level, message, meta)
 }
+
+// Export the getLogger function for creating named loggers
+export function getLogger(name) {
+  return new Logger(name)
+}

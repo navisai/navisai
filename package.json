@@ -16,5 +16,8 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18"
+  },
+  "dependencies": {
+    "selfsigned": "^5.2.0"
   }
 }

@@ -4,7 +4,7 @@
  */
 
 import { promises as fs } from 'node:fs'
-import { forge } from 'node-forge'
+import forge from 'node-forge'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 

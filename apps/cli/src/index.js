@@ -22,6 +22,7 @@ program
 program
   .command('up')
   .description('Start the Navis daemon')
+  .option('-p, --port <number>', 'Port to run the daemon on (default: 47621)')
   .action(upCommand)
 
 program

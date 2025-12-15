@@ -3,7 +3,7 @@
  * Announces the Navis daemon service on the local network
  */
 
-import { create } from 'multicast-dns'
+import multicastDns from 'multicast-dns'
 import { logger } from '@navisai/logging'
 
 export class MDNSAnnouncer {
@@ -15,7 +15,7 @@ export class MDNSAnnouncer {
 
   start() {
     try {
-      this.mdns = create()
+      this.mdns = multicastDns()
 
       // Announce HTTP service
       this.mdns.respond({

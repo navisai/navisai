@@ -7,17 +7,16 @@
   "exports": {
     ".": "./index.js",
     "./schema": "./schema.js",
-    "./repositories": "./repositories.js"
+    "./repositories": "./repositories.js",
+    "./repositories.js": "./repositories.js"
   },
   "dependencies": {
+    "@navisai/logging": "workspace:*",
     "drizzle-orm": "^0.35.0",
-    "nanoid": "^5.0.7",
-    "@navisai/logging": "workspace:*"
+    "nanoid": "^5.0.7"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0"
-  },
-  "optionalDependencies": {
-    "better-sqlite3": "^9.5.0"
+    "@types/node": "^22.0.0",
+    "better-sqlite3": "^9.6.0"
   }
 }

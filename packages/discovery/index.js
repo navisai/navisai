@@ -260,4 +260,6 @@ class DiscoveryEngine {
 // Export singleton instance
 const discovery = new DiscoveryEngine()
 
+// Export the class and the instance
+export { DiscoveryEngine }
 export default discovery

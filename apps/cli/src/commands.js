@@ -1,4 +1,4 @@
-import { exec } from 'node:child_process'
+import { exec, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -9,7 +9,7 @@ import { discoveryService } from '../../../packages/discovery/service.js'
 const execAsync = promisify(exec)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-export async function upCommand() {
+export async function upCommand(options = {}) {
   try {
     console.log('Starting Navis daemon...')
 
@@ -21,24 +21,69 @@ export async function upCommand() {
     }
 
     // Start daemon in background
-    const daemonPath = path.join(__dirname, '..', 'daemon', 'src', 'index.js')
-    const { stdout, stderr } = await execAsync(`node ${daemonPath}`, {
+    const daemonPath = path.join(__dirname, '..', '..', 'daemon', 'src', 'index.js')
+
+    // Set up environment
+    const env = { ...process.env }
+    if (options.port) {
+      env.NAVIS_PORT = options.port
+    }
+
+    // Start daemon with spawn
+    const daemon = spawn('node', [daemonPath], {
       detached: true,
       stdio: 'ignore',
+      env,
     })
 
+    // Handle errors
+    daemon.on('error', (error) => {
+      console.error('Failed to spawn daemon:', error.message)
+      process.exit(1)
+    })
+
+    // Detach from parent process
+    daemon.unref()
+
     // Give it a moment to start
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await new Promise(resolve => setTimeout(resolve, 3000))
 
     // Verify it started successfully
     const startedProcess = await findDaemonProcess()
     if (startedProcess) {
       console.log('✅ Navis daemon started successfully')
-      console.log('🌐 Access at: https://navis.local')
-      console.log('📱 Onboarding: https://navis.local/welcome')
+
+      // Check if daemon is responding on the expected port
+      try {
+        // Try without port first (if properly configured)
+        let response = await fetch('https://navis.local/api/status')
+        if (response.ok) {
+          console.log('🌐 Access at: https://navis.local')
+          console.log('📱 Onboarding: https://navis.local/welcome')
+          return
+        }
+      } catch {
+        // Try common ports from IPC_TRANSPORT.md
+        // Reference: docs/IPC_TRANSPORT.md - "Default port: 47621 (example; configurable)"
+        const ports = [47621, 47622, 47623, 8443]
+        for (const port of ports) {
+          try {
+            const response = await fetch(`https://navis.local:${port}/api/status`)
+            if (response.ok) {
+              console.log(`🌐 Access at: https://navis.local:${port}`)
+              console.log(`📱 Onboarding: https://navis.local:${port}/welcome`)
+              // Architecture requires seamless UX without manual nginx per AGENTS.md
+              return
+            }
+          } catch {
+            continue
+          }
+        }
+        console.log('\n⚠️  Daemon is running but not responding on expected ports')
+        console.log('   Try: navisai status --port=<port>')
+      }
     } else {
       console.log('❌ Failed to start daemon')
-      if (stderr) console.error(stderr)
     }
   } catch (error) {
     console.error('Failed to start daemon:', error.message)
@@ -87,12 +132,33 @@ export async function statusCommand() {
 
       // Try to get status from API
       try {
-        const response = await fetch('https://navis.local/api/status')
+        // Try without port first - mDNS should resolve navis.local per architecture
+        // Reference: AGENTS.md - "Daemon MUST serve HTTPS at https://navis.local"
+        let response = await fetch('https://navis.local/api/status')
+        let usingPort = 'default'
+
+        if (!response.ok) {
+          // Try common ports
+          const ports = [47621, 47622, 47623, 8443]
+          for (const port of ports) {
+            try {
+              response = await fetch(`https://navis.local:${port}/api/status`)
+              if (response.ok) {
+                usingPort = port
+                break
+              }
+            } catch {
+              continue
+            }
+          }
+        }
+
         if (response.ok) {
           const status = await response.json()
           console.log('\nDaemon Status:')
           console.log('  Version:', status.version)
           console.log('  Database:', status.database ? '✅ Connected' : '❌ Disconnected')
+          console.log('  Port:', usingPort)
           console.log('  Uptime:', new Date(status.timestamp).toLocaleString())
         }
       } catch {
@@ -124,7 +190,7 @@ export async function doctorCommand() {
   }
 
   // Check if daemon can be found
-  const daemonPath = path.join(__dirname, '..', '..', 'apps', 'daemon', 'src', 'index.js')
+  const daemonPath = path.join(__dirname, '..', '..', 'daemon', 'src', 'index.js')
   try {
     await fs.access(daemonPath)
     console.log('✅ Daemon binary found')
@@ -136,14 +202,14 @@ export async function doctorCommand() {
   // Check database availability
   try {
     // Import from relative path since we're in monorepo
-    const dbManager = await import('../../../packages/db/index.js')
-    await dbManager.default.initialize(':memory:')
-    if (dbManager.default.isAvailable()) {
+    const { dbManager, isAvailable } = await import('../../../packages/db/index.js')
+    await dbManager.initialize(':memory:')
+    if (isAvailable()) {
       console.log('✅ Database accessible')
     } else {
       console.log('⚠️  Database native driver not available (will run without persistence)')
     }
-    await dbManager.default.close()
+    await dbManager.close()
   } catch (error) {
     console.log('❌ Database initialization failed:', error.message)
     allGood = false
@@ -399,7 +465,7 @@ async function findDaemonProcess() {
     let cmd
 
     if (platform === 'darwin' || platform === 'linux') {
-      cmd = 'ps ax | grep "[n]ode.*index.js" | grep -v grep'
+      cmd = 'ps ax | grep -E "node.*apps/daemon/src/index.js[^/]" | grep -v grep'
     } else if (platform === 'win32') {
       cmd = 'tasklist /fi "imagename eq node.exe" /fo csv | findstr index.js'
     } else {

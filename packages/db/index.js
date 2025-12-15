@@ -125,14 +125,14 @@ class DatabaseManager {
 export const dbManager = new DatabaseManager()
 export { schema }
 
+export const isAvailable = () => {
+  return dbManager.db !== null || dbManager.client !== null
+}
+
 // Re-export some common things for convenience
 export const db = () => dbManager.db
 
-// Auto-initialize if not already done
-if (!dbManager.isAvailable) {
-  dbManager.initialize().catch(error => {
-    logger.error('Auto-initialization failed', { error: error.message })
-  })
-}
+// Note: Removed auto-initialization to prevent premature DB init during import
+// Database should be explicitly initialized by the daemon when needed
 
 export default dbManager
