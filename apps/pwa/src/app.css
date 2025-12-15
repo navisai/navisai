@@ -1,4 +1,5 @@
-@import 'tailwindcss/theme' layer(base);
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
 @import 'tailwindcss/utilities';
 @import '@fontsource/source-sans-3/400.css';
 @import '@fontsource/source-sans-3/500.css';

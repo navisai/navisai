@@ -1,0 +1,13 @@
+{
+  "name": "@navisai/discovery",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "index.js",
+  "dependencies": {
+    "@navisai/db": "workspace:*",
+    "@navisai/logging": "workspace:*"
+  },
+  "optionalDependencies": {
+    "chokidar": "^3.6.0"
+  }
+}

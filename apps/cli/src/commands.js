@@ -3,6 +3,8 @@ import { promisify } from 'node:util'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { homedir } from 'node:os'
+import { discoveryService } from '../../../packages/discovery/service.js'
 
 const execAsync = promisify(exec)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -187,6 +189,134 @@ export async function logsCommand() {
     console.log('Note: Log streaming not yet implemented')
   } catch (error) {
     console.error('Failed to fetch logs:', error.message)
+  }
+}
+
+export async function scanCommand(path, options = {}) {
+  try {
+    console.log('🔍 Scanning for projects...')
+
+    const scanPath = path || homedir()
+    console.log('Scanning path:', scanPath)
+
+    // First check if daemon is running
+    const daemonProcess = await findDaemonProcess()
+    if (!daemonProcess) {
+      console.log('❌ Navis daemon is not running. Please run `navisai up` first.')
+      process.exit(1)
+    }
+
+    // Call daemon API to scan
+    const response = await fetch('http://127.0.0.1:3415/api/discovery/scan', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        path: scanPath,
+        options: {
+          depth: options.depth || 3,
+          concurrency: options.concurrency || 5,
+          ...options
+        }
+      })
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      console.log('❌ Scan failed:', error.error || 'Unknown error')
+      if (error.details) console.log('Details:', error.details)
+      process.exit(1)
+    }
+
+    const result = await response.json()
+
+    console.log(`\n✅ Scan completed! Found ${result.count} projects in "${result.scannedPath}"\n`)
+
+    // Display discovered projects
+    if (result.projects && result.projects.length > 0) {
+      console.log('Discovered Projects:')
+      console.log('===================\n')
+
+      result.projects.forEach((project, index) => {
+        console.log(`${index + 1}. ${project.name}`)
+        console.log(`   Path: ${project.path}`)
+        console.log(`   Type: ${project.classification?.primary?.name || 'Unknown'}`)
+        if (project.detection?.primary?.framework) {
+          console.log(`   Framework: ${project.detection.primary.framework}`)
+        }
+        if (project.classification?.language) {
+          console.log(`   Language: ${project.classification.language}`)
+        }
+        console.log(`   Confidence: ${(project.detection.confidence * 100).toFixed(1)}%`)
+        console.log(`   Detected: ${new Date(project.detectedAt).toLocaleString()}`)
+        console.log('')
+      })
+    } else {
+      console.log('No projects found. Try scanning a different directory.')
+    }
+
+    return result
+  } catch (error) {
+    console.error('❌ Scan failed:', error.message)
+    process.exit(1)
+  }
+}
+
+export async function indexCommand(paths, options = {}) {
+  try {
+    if (!paths || paths.length === 0) {
+      console.log('❌ No paths provided')
+      console.log('Usage: navisai index <path1> <path2> ...')
+      process.exit(1)
+    }
+
+    console.log(`📁 Indexing ${paths.length} path(s)...`)
+
+    // Check if daemon is running
+    const daemonProcess = await findDaemonProcess()
+    if (!daemonProcess) {
+      console.log('❌ Navis daemon is not running. Please run `navisai up` first.')
+      process.exit(1)
+    }
+
+    // Call daemon API to index
+    const response = await fetch('http://127.0.0.1:3415/api/discovery/index', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ paths })
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      console.log('❌ Index failed:', error.error || 'Unknown error')
+      if (error.details) console.log('Details:', error.details)
+      process.exit(1)
+    }
+
+    const result = await response.json()
+
+    console.log(`\n✅ Index completed! ${result.discovered}/${result.total} paths contained projects\n`)
+
+    // Display results
+    result.results.forEach((item, index) => {
+      if (item.success && item.project.detected) {
+        const p = item.project
+        console.log(`✅ ${item.path}`)
+        console.log(`   Name: ${p.name}`)
+        console.log(`   Type: ${p.classification?.primary?.name || 'Unknown'}\n`)
+      } else {
+        console.log(`❌ ${item.path}`)
+        if (item.error) console.log(`   Error: ${item.error}\n`)
+      }
+    })
+
+    return result
+  } catch (error) {
+    console.error('❌ Index failed:', error.message)
+    process.exit(1)
   }
 }
 

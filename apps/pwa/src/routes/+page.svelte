@@ -62,16 +62,12 @@
         <div class="panel-body space-y-4">
           <div class="p-4 bg-slate-50 rounded-lg font-mono text-sm">
             <p>📁 /Users/vsmith/project/src/app.js</p>
-            <p class="text-slate-600">+ import { newFeature } from './feature.js'</p>
+            <p class="text-slate-600">+ import {'{ newFeature }'} from './feature.js'</p>
           </div>
 
           <div class="flex gap-2">
-            <button class="btn btn-approve">
-              Approve
-            </button>
-            <button class="btn btn-deny">
-              Deny
-            </button>
+            <button class="btn btn-approve"> Approve </button>
+            <button class="btn btn-deny"> Deny </button>
           </div>
         </div>
       </div>

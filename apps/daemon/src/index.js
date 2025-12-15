@@ -1,8 +1,11 @@
 import Fastify from 'fastify'
 import { WebSocketServer } from 'ws'
 import { createServer } from 'node:http'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 import dbManager from '../../../packages/db/index.js'
 import { projectsRepo, devicesRepo, approvalsRepo } from '../../../packages/db/repositories.js'
+import { discoveryService } from '../../../packages/discovery/service.js'
 
 class NavisDaemon {
   constructor() {
@@ -175,6 +178,171 @@ class NavisDaemon {
       } catch (error) {
         request.log.error(error)
         return reply.code(500).send({ error: 'Failed to fetch devices' })
+      }
+    })
+
+    // Discovery endpoints
+    this.server.post('/api/discovery/scan', async (request, reply) => {
+      try {
+        const { path, options = {} } = request.body
+
+        if (!path) {
+          return reply.code(400).send({ error: 'Path is required' })
+        }
+
+        // Default to user's home directory if no path provided
+        const scanPath = path || homedir()
+
+        // Discover projects
+        const projects = await discoveryService.discoverProjects(scanPath, {
+          depth: options.depth || 3,
+          concurrency: options.concurrency || 5,
+          ...options
+        })
+
+        // Store discovered projects in database
+        if (dbManager.isAvailable()) {
+          for (const project of projects) {
+            try {
+              await projectsRepo.upsert({
+                id: project.id,
+                path: project.path,
+                name: project.name,
+                updatedAt: new Date().toISOString()
+              })
+
+              // Store signals
+              if (project.signals && project.signals.length > 0) {
+                for (const signal of project.signals) {
+                  await dbManager.db.insert(dbManager.schema.projectSignals).values({
+                    id: `${project.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    projectId: project.id,
+                    type: 'signal',
+                    path: signal,
+                    confidence: 1.0
+                  }).onConflictDoNothing()
+                }
+              }
+
+              // Store classification
+              if (project.classification?.primary) {
+                await dbManager.db.insert(dbManager.schema.projectClassification).values({
+                  projectId: project.id,
+                  categories: JSON.stringify([project.classification.primary.id]),
+                  frameworks: JSON.stringify(project.classification.frameworks || []),
+                  languages: JSON.stringify([project.classification.language]),
+                  confidence: project.classification.primary.confidence,
+                  metadata: JSON.stringify(project.metadata)
+                }).onConflictDoUpdate({
+                  target: dbManager.schema.projectClassification.projectId,
+                  set: {
+                    categories: JSON.stringify([project.classification.primary.id]),
+                    frameworks: JSON.stringify(project.classification.frameworks || []),
+                    languages: JSON.stringify([project.classification.language]),
+                    confidence: project.classification.primary.confidence,
+                    metadata: JSON.stringify(project.metadata),
+                    updatedAt: new Date().toISOString()
+                  }
+                })
+              }
+            } catch (error) {
+              request.log.warn(`Failed to store project ${project.id}:`, error)
+            }
+          }
+        }
+
+        // Broadcast to WebSocket clients
+        this.broadcastWebSocket({
+          type: 'discovery_completed',
+          projects: projects.map(p => ({
+            id: p.id,
+            name: p.name,
+            path: p.path,
+            classification: p.classification?.primary?.name,
+            detectedAt: p.detectedAt
+          }))
+        })
+
+        return {
+          success: true,
+          projects,
+          count: projects.length,
+          scannedPath: scanPath
+        }
+
+      } catch (error) {
+        request.log.error(error)
+        return reply.code(500).send({
+          error: 'Discovery scan failed',
+          details: error.message
+        })
+      }
+    })
+
+    this.server.get('/api/discovery/project/:path', async (request, reply) => {
+      try {
+        const projectPath = decodeURIComponent(request.params.path)
+        const refresh = request.query.refresh === 'true'
+
+        let project
+        if (refresh) {
+          project = await discoveryService.refreshProject(projectPath)
+        } else {
+          project = await discoveryService.discoverProject(projectPath)
+        }
+
+        if (!project.detected) {
+          return reply.code(404).send({
+            error: 'Project not detected',
+            reason: project.reason || 'Unknown reason'
+          })
+        }
+
+        return project
+
+      } catch (error) {
+        request.log.error(error)
+        return reply.code(500).send({
+          error: 'Project discovery failed',
+          details: error.message
+        })
+      }
+    })
+
+    this.server.post('/api/discovery/index', async (request, reply) => {
+      try {
+        const { paths } = request.body
+
+        if (!paths || !Array.isArray(paths)) {
+          return reply.code(400).send({ error: 'Paths array is required' })
+        }
+
+        const results = []
+
+        for (const path of paths) {
+          try {
+            const project = await discoveryService.discoverProject(path)
+            results.push({ path, success: true, project })
+          } catch (error) {
+            results.push({ path, success: false, error: error.message })
+          }
+        }
+
+        const successful = results.filter(r => r.success && r.project.detected)
+
+        return {
+          success: true,
+          results,
+          discovered: successful.length,
+          total: paths.length
+        }
+
+      } catch (error) {
+        request.log.error(error)
+        return reply.code(500).send({
+          error: 'Batch discovery failed',
+          details: error.message
+        })
       }
     })
 

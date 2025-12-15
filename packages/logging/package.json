@@ -1,5 +1,14 @@
 {
   "name": "@navisai/logging",
   "version": "0.1.0",
-  "type": "module"
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.1.3"
+  }
 }

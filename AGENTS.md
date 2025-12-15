@@ -89,6 +89,11 @@ These rules **override** any permissive defaults in Global AGENTS.md:
   - Use `pnpm format` to format all files
   - Use `pnpm format:check` to verify formatting before commits
 
+**Svelte validation**:
+  - Use `svelte-check` to validate Svelte components before commits
+  - Run `npx svelte-check` in apps/pwa directory to check for errors
+  - Fix all TypeScript and Svelte-specific errors found
+
 Agents must not introduce alternative package managers or global installs.
 
 ---

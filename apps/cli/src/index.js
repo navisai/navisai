@@ -7,6 +7,8 @@ import {
   statusCommand,
   doctorCommand,
   logsCommand,
+  scanCommand,
+  indexCommand,
 } from './commands.js'
 
 // CLI configuration
@@ -40,6 +42,18 @@ program
   .command('logs')
   .description('Follow daemon logs')
   .action(logsCommand)
+
+program
+  .command('scan [path]')
+  .description('Scan a directory for projects')
+  .option('-d, --depth <number>', 'Scan depth', '3')
+  .option('-c, --concurrency <number>', 'Concurrent scans', '5')
+  .action(scanCommand)
+
+program
+  .command('index <paths...>')
+  .description('Index specific paths for projects')
+  .action(indexCommand)
 
 // Parse command line arguments
 program.parse()

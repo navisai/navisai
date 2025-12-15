@@ -13,5 +13,8 @@
     "test": "pnpm -r test",
     "format": "pnpm -r format",
     "format:check": "pnpm -r format:check"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18"
   }
 }
