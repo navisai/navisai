@@ -49,6 +49,27 @@ async function runMacOSAdminShell(shellCommand) {
   return execAsync(`osascript -e "${escapeAppleScriptString(script)}"`)
 }
 
+async function runMacSetupApp() {
+  const dialog = `
+tell application "System Events"
+  activate
+  set dialogText to "Navis needs to install a helper bridge that owns port 443 so https://navis.local works.\\n\\nPress Continue to run the one-time setup. This will prompt for your password via the standard macOS security sheet."
+  set userChoice to button returned of (display dialog dialogText buttons {"Cancel", "Continue"} default button "Continue" with title "Navis Setup" giving up after 30)
+end tell
+return userChoice
+`
+  try {
+    const { stdout } = await execAsync(`osascript -e ${escapeAppleScriptCommand(dialog)}`)
+    return stdout.trim() === 'Continue'
+  } catch {
+    return false
+  }
+}
+
+function escapeAppleScriptCommand(command) {
+  return command.replaceAll('"', '\\\\"').replaceAll('\\n', '\\\\n')
+}
+
 async function hasCommand(cmd) {
   try {
     await execAsync(`command -v ${cmd}`)
@@ -239,6 +260,13 @@ export async function setupCommand() {
   }
 
   const os = platform()
+  if (os === 'darwin') {
+    const proceed = await runMacSetupApp()
+    if (!proceed) {
+      console.log('Setup canceled in macOS UI.')
+      return
+    }
+  }
   if (os === 'darwin') {
     console.log('\nInstalling the Navis Bridge (requires an OS admin prompt)...')
     await installMacOSBridge()

@@ -75,7 +75,7 @@ The NPM CLI remains the developer/control surface:
 - `navisai doctor` validates readiness.
 
 For mainstream macOS users, the GUI installer/setup app is the **default**.
-The terminal command `navisai setup` is an **advanced alternative** for power users.
+The terminal command `navisai setup` is an **advanced alternative** for power users. It now opens a small “Navis Setup” dialog (via AppleScript) to mimic the installer UX before performing the bridge install.
 
 ---
 
@@ -102,4 +102,3 @@ Non-goals:
 - Requiring nginx
 - Requiring users to manually edit `/etc/hosts`
 - Binding the daemon directly to 443
-
