@@ -1,86 +1,200 @@
-# Navis AI Agents & ACP Sessions
+# Local AGENTS.md — NavisAI Project Protocol
 
-Version: v0.1
+Use this file **together with Global @AGENTS.md**.  
+This document defines **NavisAI-specific architecture, guardrails, and workflows** that supplement the global agent rules.
 
----
-
-# 1. Agent Definition
-
-In Navis, an **agent** is any AI-assisted process that interacts with code, including:
-
-- ACP (Anthropic Code panel in Zed)
-- Codex / code assistants
-- Terminal-based AI tools
-
-Each agent session is mirrored into Navis so the user may observe and approve actions.
+If a conflict exists, **this file overrides Global AGENTS.md** for this repository.
 
 ---
 
-# 2. Session Lifecycle
+## 1. Project Snapshot (NavisAI)
 
-### States
-- `created`
-- `active`
-- `awaiting_approval`
-- `completed`
-- `error`
-
-### Metadata Stored
-- session ID
-- project ID
-- agent type
-- timestamps
-- diff / suggested changes (optional future)
+- **Project type**: Local-first developer control plane
+- **Primary components**:
+  - Local daemon (authority, orchestration, approvals)
+  - `navisai` CLI (control + automation)
+  - SvelteKit PWA (mobile-first UI, LAN accessible)
+- **Distribution model**:
+  - OSS monorepo (this repo)
+  - NPM-distributed consumer tooling
+  - Premium features implemented out-of-repo
+- **Core principle**: Human-in-the-loop by default
 
 ---
 
-# 3. Approval Model
+## 2. Monorepo Topology (NavisAI-specific)
 
-Before an agent mutates files or Git history:
-
-1. Agent proposes action
-2. Daemon captures request
-3. PWA displays approval card:
 ```
-Agent wants to modify 3 files.
-[View Details] [Approve] [Reject]
+apps/
+  daemon/        # Control plane (authoritative)
+  cli/           # navisai CLI
+  pwa/           # SvelteKit PWA
+
+packages/
+  db/            # Drizzle ORM + SQLite (native driver optional)
+  logging/       # Shared logging utilities
+  create-navis/  # Project generator
+
+docs/
+  *.md           # Pairing, IPC, auth, security, plugin specs
 ```
 
-4. Approval status saved in DB
-
-Daemon performs no mutation unless `APPROVED`.
-
----
-
-# 4. ACP Mirroring
-
-Daemon captures ACP request/response events by monitoring:
-
-- Zed ACP API bridge (local)
-- Project filesystem events (future)
-- Inferred actions from agent output
-
-Mirrored to PWA in real-time via WebSocket.
+Folder boundaries are intentional and must be respected.  
+Do not collapse daemon subsystems or bypass the daemon from clients.
 
 ---
 
-# 5. Future Agent Capabilities
+## 3. NavisAI Non-Negotiables (Overrides)
 
-Not in MVP but planned:
+These rules **override** any permissive defaults in Global AGENTS.md:
 
-- agent chaining
-- autonomous test running
-- previewable diffs
-- automatic rollback
-- agent profiles per project
+1. **Daemon authority**
+   - CLI and PWA never bypass the daemon.
+   - All privileged actions flow through it.
+
+2. **No mandatory native dependencies**
+   - Native modules (e.g. SQLite drivers) must remain optional.
+   - `pnpm install` must succeed even if native builds fail.
+
+3. **No auto-starting behavior**
+   - Nothing binds ports, pairs devices, or launches services on install.
+
+4. **Human-in-the-loop by default**
+   - Destructive, privileged, or state-changing actions require approval paths.
+   - Silent automation is forbidden.
+
+5. **OSS boundary enforcement**
+   - No premium / enterprise logic in this repository.
+   - Premium features live out-of-repo only.
 
 ---
 
-# 6. Security Rules
+## 4. Tooling & Environment Constraints
 
-- Agents cannot bypass approval flow.
-- File access is readonly until approved.
-- Session replay logs stored locally only.
-- Agent metadata never leaves machine.
+- **Package manager**: `pnpm` only
+- **Node**: modern Node (current dev on Node 22.x)
+- **Workspace system**: pnpm workspaces
+- **Language preference**:
+  - JavaScript + JSDoc preferred
+  - TypeScript only when localized and justified
+
+Agents must not introduce alternative package managers or global installs.
 
 ---
+
+## 5. Command Discipline
+
+Run only commands that exist in the relevant `package.json`.
+
+### Install
+```bash
+pnpm install
+```
+
+### Workspace usage
+```bash
+pnpm -r <command>
+pnpm --filter <pkg> <command>
+```
+
+### PWA dev (if applicable)
+```bash
+pnpm --filter @navisai/pwa dev
+```
+
+---
+
+## 6. Database & Persistence Policy
+
+- SQLite is the default persistence layer.
+- Drizzle ORM is used for schema + queries.
+- Native drivers must be **lazy-loaded and optional**.
+
+If a driver is missing:
+- install still succeeds
+- runtime emits a clear, actionable message
+- daemon does not crash at startup
+
+Agents must not “fix” native build issues by making drivers mandatory.
+
+---
+
+## 7. High-Risk Operations (NavisAI-specific)
+
+The following are always considered **high-risk** in this project:
+
+- File system mutation
+- Git operations
+- Shell command execution
+- Network exposure beyond localhost
+- Device pairing / trust establishment
+- Process lifecycle control
+
+High-risk changes must:
+- be minimal in scope
+- be reversible
+- anticipate approval mechanisms (even if stubbed)
+
+When unsure, treat the action as high-risk.
+
+---
+
+## 8. Logging & Observability
+
+- Use shared logging utilities (`@navisai/logging`)
+- Logs must be structured, scoped, and meaningful
+- Avoid raw `console.log` except for temporary debugging
+
+Logs are part of the UX for a local control plane.
+
+---
+
+## 9. Change Workflow (Local)
+
+1. **Plan**
+   - Identify affected subsystems
+   - List touched files
+
+2. **Implement**
+   - Keep changes focused
+   - Respect daemon boundaries
+
+3. **Verify**
+   - `pnpm install` succeeds cleanly
+   - Touched apps still start/build
+
+4. **Document**
+   - Update relevant docs if behavior or architecture changes
+
+---
+
+## 10. Local Verification Checklist
+
+- [ ] `pnpm install` succeeds on clean checkout
+- [ ] No mandatory native deps introduced
+- [ ] No services auto-start
+- [ ] No premium logic added
+- [ ] Daemon authority preserved
+- [ ] Logs added where behavior is non-obvious
+
+---
+
+## 11. Security Posture (Local)
+
+- Default to local-only
+- LAN exposure must be explicit and gated
+- Daemon is a privileged process
+- Never assume trust without pairing + approval
+
+---
+
+## 12. Notes for Agents Working Here
+
+- Ask: **“What is the smallest correct change?”**
+- Stop and ask if requirements are ambiguous
+- Do not speculate about premium features
+- Treat this file as binding
+
+---
+
+*This file should be updated whenever NavisAI-specific architecture, tooling, or workflow changes.*
