@@ -89,7 +89,15 @@ CLI communicates with daemon via HTTP on local loopback.
 
 ---
 
-## 2.3 PWA UI  
+## 2.3 Setup Helper & Bridge
+
+**Location:** `apps/setup-app` (published as `@navisai/setup-app`)
+
+The setup helper is the Apple-like entrypoint that `navisai setup` launches for mainstream users. It shows a friendly dialog, asks for administrator approval once, and installs the Navis Bridge that owns TCP 443 and forwards to `127.0.0.1:47621`. The helper then opens `https://navis.local/welcome` so the onboarding UI loads immediately and provides an uninstall path to remove the privileged bridge cleanly.
+
+The bridge itself runs as a small `navisai-bridge` process (see `apps/daemon/src/bridge.js`) managed by LaunchDaemons/systemd services/Windows services depending on the platform. It preserves TLS end-to-end and lets the daemon remain unprivileged while the canonical origin stays `https://navis.local` (no port) for LAN browsers.
+
+## 2.4 PWA UI  
 ### ⚡ **Updated with Chosen Starter Template + Tailwind v4**
 
 **Location:** `apps/pwa`  
@@ -169,8 +177,8 @@ All shared logic lives in `packages/`.
 - REST/WS schema definitions (TS/JSON schema)
 - Shared between CLI ⇄ daemon ⇄ PWA
 
-### 3.5 `@navisai/ui-components` (optional)
-- Shared low-level UI components for Svelte apps
+### 3.5 `@navisai/logging`
+- Structured, shared logging utilities consumed by daemon, CLI, and setup tooling
 
 ---
 

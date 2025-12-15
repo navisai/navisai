@@ -43,6 +43,8 @@ Run setup:
 navisai setup
 ```
 
+`navisai setup` launches the cross-platform helper from `apps/setup-app` (`@navisai/setup-app`) so the privileged bridge install (macOS LaunchDaemon / Linux systemd / Windows service) happens with a user-facing dialog before normal `navisai up` runs without `sudo`.
+
 Setup may require administrator privileges (OS prompt) to register the bridge service and bind 443. Normal usage must not require `sudo`.
 
 ---

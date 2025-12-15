@@ -160,6 +160,7 @@ LAN access model (canonical):
 - The daemon binds to loopback by default (`127.0.0.1:47621`).
 - After explicit, one-time setup (`navisai setup`), an OS-managed bridge owns port 443 and forwards to the daemon, enabling the clean LAN origin: `https://navis.local` (no port).
 - mDNS/Bonjour provides LAN name resolution and discovery for `navis.local` (see `NETWORKING.md`).
+- `navisai setup` currently launches the helper in `apps/setup-app` (`@navisai/setup-app`) so the privileged bridge/mDNS installation is gated behind a single user approval dialog before daily use.
 
 Explicit guarantee:
 > NavisAI does not transmit data off-machine unless the user explicitly enables it.

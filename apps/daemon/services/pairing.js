@@ -3,7 +3,7 @@
  * Handles device pairing via mDNS, QR codes, and tokens
  */
 
-import { randomBytes } from 'node:crypto'
+import { randomBytes, createHash } from 'node:crypto'
 import QRCode from 'qrcode'
 
 export class PairingService {
@@ -175,7 +175,8 @@ export class PairingService {
     }
 
     const deviceId = `device_${randomBytes(12).toString('hex')}`
-    const deviceSecret = randomBytes(32).toString('hex')
+    const rawSecret = randomBytes(32).toString('hex')
+    const deviceSecret = createHash('sha256').update(rawSecret).digest('hex')
     const now = new Date().toISOString()
 
     await this.dbManager.execute(

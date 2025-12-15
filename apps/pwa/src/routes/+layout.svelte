@@ -1,9 +1,10 @@
 <script>
-	import favicon from '$lib/assets/favicon.svg';
-	import { onMount } from 'svelte'
-	import { appStore, isConnected, error, isLoading } from '$lib/stores/app'
-	import { projectsStore } from '$lib/stores/projects'
-	import { approvalsStore } from '$lib/stores/approvals'
+import favicon from '$lib/assets/favicon.svg';
+import { onMount } from 'svelte'
+import { appStore, isConnected, error, isLoading } from '$lib/stores/app'
+import { projectsStore } from '$lib/stores/projects'
+import { approvalPrompt, approvalsStore } from '$lib/stores/approvals'
+import ApprovalPromptModal from '$lib/components/ApprovalPromptModal.svelte'
 
 	let { children } = $props();
 
@@ -55,7 +56,7 @@
     </div>
   {/if}
 
-  {#if $isLoading}
+{#if $isLoading}
     <div class="flex items-center justify-center min-h-[60vh]">
       <div class="flex flex-col items-center gap-4">
         <div
@@ -66,5 +67,9 @@
     </div>
   {:else}
     {@render children()}
-  {/if}
+{/if}
+
+{#if $approvalPrompt}
+  <ApprovalPromptModal approval={$approvalPrompt} />
+{/if}
 </div>

@@ -67,10 +67,18 @@ macOS user-friendly setup:
 
 - SQLite persistence via Drizzle.
 - Native drivers remain optional; install must succeed even if native builds fail.
+- The DB package itself is required for the daemon to store state (`~/.navis/db.sqlite`), while the optional `better-sqlite3` dependency is a performance/tuning choice; the fallback path keeps the app working even when native compilation fails.
 
 ### `@navisai/api-contracts`
 
 - REST/WS schema definitions shared across daemon/CLI/PWA.
+
+### `@navisai/setup-app`
+
+- GUI-friendly helper that `navisai setup` launches on macOS/Linux/Windows to install the Navis Bridge.
+- Shows the Apple-like approval dialog, runs the privileged install once, and then opens `https://navis.local/welcome`.
+- The bridge owns TCP 443, forwards to `127.0.0.1:47621`, and ensures the canonical `https://navis.local` origin works without requiring `sudo` during `navisai up`.
+- The helper also calls the bridge uninstall path during reset so the setup flow is reversible.
 
 ---
 

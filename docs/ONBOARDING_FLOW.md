@@ -34,6 +34,8 @@ Setup responsibilities (explicit user consent; may require admin privileges):
 
 Setup is never silent and is fully reversible.
 
+The `navisai setup` command launches the platform helper (`apps/setup-app` / `@navisai/setup-app`) so installing the Navis Bridge (443 → 47621) and enabling mDNS is bundled with a friendly approval dialog before the canonical `https://navis.local` origin becomes available.
+
 Preferred macOS UX:
 - Users complete this “machine setup” via a signed installer or setup app (see `MACOS_SETUP_EXPERIENCE.md`).
 - The CLI remains available for power users and development.
@@ -81,6 +83,7 @@ Laptop receives prompt:
 Pair device <name>?
 [Approve] [Reject]
 ```
+Real-time updates (WebSocket `approval.request` + `approval.updated`) keep that prompt live; the host UI auto-displays the latest pending approval without refresh.
 
 ### 3.5 Device Paired
 BLE + QR + mDNS signals turn off automatically.

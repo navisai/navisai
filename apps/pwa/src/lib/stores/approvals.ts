@@ -8,6 +8,8 @@ interface ApprovalsState {
   resolving: string[]
 }
 
+const livePrompt = writable<Approval | null>(null)
+
 function createApprovalsStore() {
   const { subscribe, set, update } = writable<ApprovalsState>({
     pending: [],
@@ -84,10 +86,19 @@ function createApprovalsStore() {
     update(state => ({ ...state, error: null }))
   }
 
+  const triggerLivePrompt = (approval: Approval) => {
+    livePrompt.set(approval)
+  }
+
+  const clearLivePrompt = () => {
+    livePrompt.set(null)
+  }
+
   // Listen for approval updates from WebSocket
   apiClient.on('approval.request', (data: any) => {
     if (data?.approval) {
       addApproval(data.approval)
+      triggerLivePrompt(data.approval)
     }
   })
 
@@ -97,6 +108,7 @@ function createApprovalsStore() {
         ...state,
         pending: state.pending.filter(it => it.id !== data.approval.id),
       }))
+      clearLivePrompt()
     }
   })
 
@@ -109,6 +121,8 @@ function createApprovalsStore() {
     addApproval,
     removeApproval,
     clearError,
+    approvalPrompt: livePrompt,
+    clearLivePrompt,
   }
 }
 
@@ -119,3 +133,4 @@ export const pendingApprovals = derived(approvalsStore, $approvals => $approvals
 export const isLoadingApprovals = derived(approvalsStore, $approvals => $approvals.loading)
 export const approvalsError = derived(approvalsStore, $approvals => $approvals.error)
 export const isResolving = derived(approvalsStore, $approvals => $approvals.resolving)
+export const approvalPrompt = livePrompt

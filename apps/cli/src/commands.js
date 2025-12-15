@@ -3,7 +3,7 @@ import { promisify } from 'node:util'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { homedir, platform } from 'node:os'
+import { homedir, networkInterfaces, platform } from 'node:os'
 import { createRequire } from 'node:module'
 import readline from 'node:readline/promises'
 import { NAVIS_PATHS } from '@navisai/api-contracts'
@@ -14,6 +14,68 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
 
 const CANONICAL_ORIGIN = 'https://navis.local'
+const CERT_PATH = path.join(homedir(), '.navis', 'certs', 'navis.local.crt')
+const KEY_PATH = path.join(homedir(), '.navis', 'certs', 'navis.local.key')
+
+function getLanAddresses() {
+  const interfaces = networkInterfaces()
+  const addresses = []
+  for (const iface of Object.values(interfaces)) {
+    for (const addr of iface || []) {
+      if (!addr || addr.internal) continue
+      if (addr.family === 'IPv4' || addr.family === 'IPv6') {
+        addresses.push(addr.address)
+      }
+    }
+  }
+  return addresses
+}
+
+async function resolveNavisLocal() {
+  try {
+    const { lookup } = await import('node:dns/promises')
+    const result = await lookup('navis.local')
+    return { success: true, address: result.address }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
+async function checkTlsCertificate() {
+  try {
+    const pem = await fs.readFile(CERT_PATH, 'utf8')
+    const { X509Certificate } = await import('node:crypto')
+    const cert = new X509Certificate(pem)
+    const validFrom = new Date(cert.validFrom)
+    const validTo = new Date(cert.validTo)
+
+    return {
+      exists: true,
+      path: CERT_PATH,
+      validFrom,
+      validTo,
+      isExpired: validTo < new Date(),
+    }
+  } catch (error) {
+    return {
+      exists: false,
+      error: error.message,
+    }
+  }
+}
+
+async function removeTlsMaterials() {
+  try {
+    await Promise.all([
+      fs.rm(CERT_PATH, { force: true }),
+      fs.rm(KEY_PATH, { force: true }),
+    ])
+    return true
+  } catch (error) {
+    console.error('Failed to remove TLS materials:', error.message)
+    return false
+  }
+}
 
 function resolveDaemonEntrypoint() {
   try {
@@ -228,6 +290,19 @@ export async function resetCommand() {
   await uninstallBridge()
 
   console.log('✅ Bridge removed.')
+  console.log('\nStopping Navis daemon to halt mDNS advertising...')
+  await downCommand()
+
+  if (await confirm('Also remove TLS certificates from ~/.navis/certs?')) {
+    const removed = await removeTlsMaterials()
+    if (removed) {
+      console.log('✅ TLS materials removed.')
+    } else {
+      console.log('⚠️  TLS materials removal failed; check permissions.')
+    }
+  } else {
+    console.log('TLS materials left in place.')
+  }
 }
 
 export async function upCommand(options = {}) {
@@ -395,6 +470,43 @@ export async function doctorCommand() {
   } catch (error) {
     console.log(`⚠️  Not reachable at ${CANONICAL_ORIGIN}`)
     console.log(`   ${error.message}`)
+    allGood = false
+  }
+
+  const lanAddresses = getLanAddresses()
+  const mdnsResult = await resolveNavisLocal()
+  if (mdnsResult.success) {
+    const matchesLan = lanAddresses.includes(mdnsResult.address)
+    if (matchesLan) {
+      console.log(`✅ mDNS: navis.local resolves to ${mdnsResult.address} (host LAN)`)
+    } else {
+      console.log(
+        `⚠️  mDNS: navis.local resolved to ${mdnsResult.address} but LAN IPs are ${lanAddresses.join(', ') ||
+          'none'}`
+      )
+      if (lanAddresses.length > 0) {
+        allGood = false
+      }
+    }
+  } else {
+    console.log(`⚠️  mDNS lookup failed: ${mdnsResult.error}`)
+    allGood = false
+  }
+
+  const tlsStatus = await checkTlsCertificate()
+  if (tlsStatus.exists) {
+    const now = new Date()
+    const expiresInMs = tlsStatus.validTo - now
+    const expiresInDays = Math.max(0, Math.ceil(expiresInMs / (1000 * 60 * 60 * 24)))
+    const validityMsg = tlsStatus.isExpired ? ' (expired)' : ` (expires in ~${expiresInDays} day${expiresInDays === 1 ? '' : 's'})`
+    console.log(
+      `✅ TLS cert: ${tlsStatus.path} (valid from ${tlsStatus.validFrom.toISOString()} to ${tlsStatus.validTo.toISOString()})${validityMsg}`
+    )
+    if (tlsStatus.isExpired) {
+      allGood = false
+    }
+  } else {
+    console.log(`⚠️  TLS certificate missing or unreadable: ${tlsStatus.error}`)
     allGood = false
   }
 

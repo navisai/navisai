@@ -10,11 +10,18 @@ If a conflict exists, **this file overrides Global AGENTS.md** for this reposito
 ## 0. Docs Are Canonical (No Veering)
 
 - The `docs/` folder is the source of truth for architecture, onboarding, setup, pairing, networking, IPC, auth, local-first guarantees, and security. Before implementing or changing behavior, identify the relevant doc(s) and keep code aligned to them.
+- Doc sweeps (multi-file documentation alignment passes) require explicit user verification/approval **before** making broad edits; when in doubt, limit changes to the minimum necessary doc(s) and ask first.
 - If documentation conflicts:
   - Treat `docs/NETWORKING.md` as the doc-of-record for canonical origin and LAN access.
   - Update the conflicting doc(s) to match `docs/NETWORKING.md` (do not “split the difference”).
-- If code and docs conflict, assume docs are canonical and update code (and docs if needed) to remove ambiguity.
+- If code and docs conflict, assume docs are canonical and update **code** first; only update docs when (a) docs are internally inconsistent/ambiguous, or (b) the user explicitly approves an architectural change.
 - Do not improvise new architecture. If requirements are not covered, add/extend docs in `docs/` first, then implement.
+- Before coding, explicitly name the doc(s) you are following and call those out in your plan/commit message; do not proceed with architectural work until you know which doc sets the rules.
+- Never introduce new top-level folders, packages, or architectural layers without first documenting them in `docs/`; update the docs before creating the code structure so future agents can follow the same path.
+
+### Documentation Change Policy (Feasibility-First)
+- If you suspect a documented requirement is technically infeasible or would degrade UX/security, stop and write a short “feasibility note” proposal (what’s infeasible, why, and 1–2 alternatives) and wait for explicit user approval before changing the doc.
+- Do not “edit while thinking” in docs. Propose, get approval, then apply the doc changes in a focused patch.
 
 ### Required Doc Cross-Checks (Use As a Map)
 - Networking / origins / ports / bridge / mDNS: `docs/NETWORKING.md`, `docs/SETUP.md`, `docs/SECURITY.md`
@@ -288,6 +295,7 @@ Logs are part of the UX for a local control plane.
 - Do not speculate about premium features
 - Treat this file as binding
 - **No attribution**: Do not add AI-generated attribution to commits, messages, or code
+- Before acting, double-check this file (via `CLAUDE.md` if you need a shortcut) and the relevant `docs/` pages so you never drift from documented architecture.
 
 ---
 

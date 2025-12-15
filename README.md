@@ -46,17 +46,18 @@ navisai/
   RELEASE_NOTES.md
   LICENSE
 
-  apps/
+apps/
     daemon/       # local backend
     cli/          # navisai CLI
     pwa/          # SvelteKit + vite-pwa PWA
+    setup-app/    # Apple-like setup helper that installs the Navis Bridge
 
-  packages/
+packages/
     core/         # types, state machines, helpers
     db/           # sqlite wrapper + migrations
     discovery/    # file scanning + classification
     api-contracts/
-    ui-components/ (optional)
+    logging/       # structured, shared logging utilities
 
   pro/            # intentionally excluded (premium-only)
 ```
@@ -77,11 +78,13 @@ Navis targets a single Apple-like LAN origin:
 
 `https://navis.local` (no port)
 
-Run the one-time setup to enable the bridge + discovery needed for this experience:
+Run the one-time setup to install the Navis Bridge (443 → daemon port 47621), enable mDNS, and generate the certificate so `https://navis.local` works without needing `sudo` again:
 
 ```
 navisai setup
 ```
+
+`navisai setup` launches the GUI-ready helper (`apps/setup-app` / `@navisai/setup-app`) so mainstream macOS users see a friendly dialog and only approve the bridge once. After setup, `navisai up` starts an unprivileged daemon that is reachable at `https://navis.local/welcome`.
 
 ### 2. Start Navis
 

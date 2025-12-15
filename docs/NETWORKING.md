@@ -69,6 +69,8 @@ Implementation note:
 
 `navisai setup` (or equivalent) performs OS-level configuration needed for the clean LAN URL:
 
+The command currently launches the helper in `apps/setup-app` (`@navisai/setup-app`) so the privileged bridge install is gated behind a user-friendly dialog on each OS.
+
 - Install/enable the Navis Bridge (443 → 47621).
 - Enable mDNS advertisement for `navis.local`.
 - Generate/refresh the `navis.local` certificate used by the daemon.
