@@ -5,5 +5,9 @@
   "bin": {
     "navisai": "src/index.js"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@navisai/db": "workspace:*",
+    "commander": "^12.1.0"
+  }
 }
