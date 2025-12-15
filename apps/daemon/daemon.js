@@ -6,6 +6,7 @@
  */
 
 import Fastify from 'fastify'
+import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir, networkInterfaces } from 'node:os'
@@ -180,7 +181,10 @@ export class NavisDaemon {
     this.approvalService = new ApprovalService()
     await this.approvalService.initialize()
 
-    this.pairingService = new PairingService()
+    this.pairingService = new PairingService({
+      approvalService: this.approvalService,
+      dbManager: this.dbManager,
+    })
     await this.pairingService.initialize()
   }
 
@@ -191,7 +195,15 @@ export class NavisDaemon {
 
     // Public endpoints (no auth required)
     this.fastify.get(NAVIS_PATHS.status, this.getStatusHandler.bind(this))
-    this.fastify.post(NAVIS_PATHS.pairing.request, this.pairingService.handleRequest.bind(this.pairingService))
+    this.fastify.get(NAVIS_PATHS.certs.navisLocalCrt, this.getCertHandler.bind(this))
+    this.fastify.post(
+      NAVIS_PATHS.pairing.start,
+      this.pairingService.handleStart.bind(this.pairingService)
+    )
+    this.fastify.post(
+      NAVIS_PATHS.pairing.request,
+      this.pairingService.handleRequest.bind(this.pairingService)
+    )
 
     // Auth-required endpoints (will add middleware)
     this.fastify.get(NAVIS_PATHS.projects.list, this.getProjectsHandler.bind(this))
@@ -199,6 +211,7 @@ export class NavisDaemon {
     this.fastify.get(NAVIS_PATHS.sessions, this.getSessionsHandler.bind(this))
     this.fastify.get(NAVIS_PATHS.approvals.list, this.getApprovalsHandler.bind(this))
     this.fastify.get(NAVIS_PATHS.approvals.pending, this.getPendingApprovalsHandler.bind(this))
+    this.fastify.get('/approvals/:id', this.getApprovalHandler.bind(this))
     this.fastify.post('/approvals/:id/approve', this.approveHandler.bind(this))
     this.fastify.post('/approvals/:id/reject', this.rejectHandler.bind(this))
 
@@ -327,6 +340,17 @@ pnpm --filter @navisai/daemon dev</code></pre>
     }
   }
 
+  async getCertHandler(request, reply) {
+    try {
+      const cert = await readFile(this.sslManager.certFile)
+      reply.type('application/x-x509-ca-cert')
+      return cert
+    } catch {
+      reply.code(404)
+      return { error: 'Certificate not found' }
+    }
+  }
+
   async getProjectsHandler(request, reply) {
     // TODO: Add auth middleware
     if (!this.projectService) {
@@ -361,6 +385,21 @@ pnpm --filter @navisai/daemon dev</code></pre>
     return await this.approvalService.listApprovals()
   }
 
+  async getApprovalHandler(request, reply) {
+    if (!this.approvalService) {
+      reply.code(404)
+      return { error: 'Approval not found' }
+    }
+    const { id } = request.params
+    try {
+      const approval = await this.approvalService.getApproval(id)
+      return approval
+    } catch {
+      reply.code(404)
+      return { error: 'Approval not found' }
+    }
+  }
+
   async getPendingApprovalsHandler(request, reply) {
     // TODO: Add auth middleware
     if (!this.approvalService) {
@@ -379,7 +418,9 @@ pnpm --filter @navisai/daemon dev</code></pre>
       reply.code(404)
       return { error: 'Approval not found' }
     }
-    return await this.approvalService.approve(id)
+    const approval = await this.approvalService.approve(id)
+    await this.pairingService?.onApprovalResolved?.(approval)
+    return approval
   }
 
   async rejectHandler(request, reply) {
@@ -389,7 +430,9 @@ pnpm --filter @navisai/daemon dev</code></pre>
       reply.code(404)
       return { error: 'Approval not found' }
     }
-    return await this.approvalService.reject(id)
+    const approval = await this.approvalService.reject(id)
+    await this.pairingService?.onApprovalResolved?.(approval)
+    return approval
   }
 
   async getDevicesHandler(request, reply) {

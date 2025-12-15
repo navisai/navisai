@@ -4,28 +4,42 @@
  */
 
 import { readFile, writeFile, access, mkdir } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { homedir } from 'node:os'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export class SSLManager {
   constructor() {
     this.dataDir = join(homedir(), '.navis')
-    this.keyFile = join(this.dataDir, 'navis.key')
-    this.certFile = join(this.dataDir, 'navis.crt')
+    this.certsDir = join(this.dataDir, 'certs')
+
+    // Canonical locations (docs/SETUP.md)
+    this.keyFile = join(this.certsDir, 'navis.local.key')
+    this.certFile = join(this.certsDir, 'navis.local.crt')
+
+    // Legacy locations (migration)
+    this.legacyKeyFile = join(this.dataDir, 'navis.key')
+    this.legacyCertFile = join(this.dataDir, 'navis.crt')
   }
 
   async ensureCertificates() {
     try {
       // Create data directory if it doesn't exist
-      await mkdir(this.dataDir, { recursive: true })
+      await mkdir(this.certsDir, { recursive: true })
 
-      // Check if certificates already exist
+      // Migrate legacy certs if present
+      const legacyKeyExists = await this.fileExists(this.legacyKeyFile)
+      const legacyCertExists = await this.fileExists(this.legacyCertFile)
       const keyExists = await this.fileExists(this.keyFile)
       const certExists = await this.fileExists(this.certFile)
 
+      if (!keyExists && !certExists && legacyKeyExists && legacyCertExists) {
+        const legacyKey = await readFile(this.legacyKeyFile)
+        const legacyCert = await readFile(this.legacyCertFile)
+        await writeFile(this.keyFile, legacyKey)
+        await writeFile(this.certFile, legacyCert)
+      }
+
+      // Check if certificates already exist
       if (keyExists && certExists) {
         console.log('📜 SSL certificates found')
         return

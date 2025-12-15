@@ -4,6 +4,9 @@ export const NAVIS_PATHS: {
   welcome: '/welcome'
   status: '/status'
   ws: '/ws'
+  certs: {
+    navisLocalCrt: '/certs/navis.local.crt'
+  }
   pairing: {
     request: '/pairing/request'
     start: '/pairing/start'
@@ -31,4 +34,3 @@ export const NAVIS_PATHS: {
 }
 
 export const NAVIS_WS_EVENTS: readonly string[]
-

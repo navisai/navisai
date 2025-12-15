@@ -18,10 +18,19 @@ export class ApprovalService {
     }
   }
 
-  async createApproval(operation, metadata = {}) {
+  async getApproval(id) {
+    const approval = this.approvals.get(id)
+    if (!approval) {
+      throw new Error('Approval not found')
+    }
+    return approval
+  }
+
+  async createApproval(type, payload, metadata = {}) {
     const approval = {
       id: this.generateId(),
-      operation,
+      type,
+      payload: typeof payload === 'string' ? payload : JSON.stringify(payload),
       status: 'pending',
       createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes
@@ -43,7 +52,7 @@ export class ApprovalService {
     }
 
     approval.status = 'approved'
-    approval.approvedAt = new Date().toISOString()
+    approval.resolvedAt = new Date().toISOString()
     this.approvals.set(id, approval)
 
     return approval
@@ -59,18 +68,10 @@ export class ApprovalService {
       throw new Error('Approval already processed')
     }
 
-    approval.status = 'rejected'
-    approval.rejectedAt = new Date().toISOString()
+    approval.status = 'denied'
+    approval.resolvedAt = new Date().toISOString()
     this.approvals.set(id, approval)
 
-    return approval
-  }
-
-  async getApproval(id) {
-    const approval = this.approvals.get(id)
-    if (!approval) {
-      throw new Error('Approval not found')
-    }
     return approval
   }
 
@@ -78,7 +79,9 @@ export class ApprovalService {
     const now = new Date()
     for (const [id, approval] of this.approvals) {
       if (new Date(approval.expiresAt) < now) {
-        approval.status = 'expired'
+        approval.status = 'denied'
+        approval.deniedReason = 'expired'
+        approval.resolvedAt = approval.resolvedAt || new Date().toISOString()
         this.approvals.set(id, approval)
       }
     }

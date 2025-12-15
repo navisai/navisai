@@ -63,7 +63,8 @@ Recommended OS integrations:
 Current implementation status:
 
 - macOS: implemented via a `launchd` LaunchDaemon (`com.navisai.bridge`) that runs `navisai-bridge` and binds 443 (admin prompt required once).
-- Linux/Windows: not implemented yet (spec-only).
+- Linux: implemented via a `systemd` service (`navisai-bridge.service`) installed by `navisai setup` (admin privileges via `pkexec` if available, otherwise `sudo`).
+- Windows: not implemented yet (spec-only).
 
 ### 3.2 mDNS/Bonjour for `navis.local`
 
@@ -85,7 +86,9 @@ Notes:
 Requirements:
 
 - The daemon serves HTTPS with a certificate valid for `navis.local`.
-- Setup generates and stores cert material under `~/.navis/certs/` (layout defined by implementation).
+- Setup generates and stores cert material under `~/.navis/certs/`:
+  - `~/.navis/certs/navis.local.crt`
+  - `~/.navis/certs/navis.local.key`
 - On iOS, users must perform an explicit one-time trust action. Setup/onboarding must guide this.
 - Implementation note (v0.1): certificate generation happens automatically on first daemon startup; `navisai setup` may later pre-generate and export trust material for mobile.
 

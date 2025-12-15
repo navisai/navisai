@@ -71,7 +71,9 @@ When the daemon is in `DISCOVERABLE`:
    Content-Type: application/json
 
    {
-     "pairingToken": "<random-128-bit-hex>"
+     "pairingToken": "<random-128-bit-hex>",
+     "clientName": "<user friendly name>",
+     "clientDeviceInfo": { ... }
    }
    ```
 
@@ -122,7 +124,7 @@ Clients can discover the daemon and then request QR or start pairing through the
 Sequence:
 
 1. Client discovers daemon (QR, BLE, or mDNS).
-2. Client sends:
+2. Client sends (recommended):
 
    ```
    POST /pairing/request
@@ -147,6 +149,16 @@ Sequence:
 
    - Approve → device becomes trusted.
    - Reject → pairingToken invalidated.
+
+6. Client receives a response after approval/reject (long-polling semantics; exact transport can evolve):
+
+   ```json
+   {
+     "deviceId": "<uuid>",
+     "deviceSecret": "<random-secret>",
+     "apiBaseUrl": "https://navis.local"
+   }
+   ```
 
 ---
 

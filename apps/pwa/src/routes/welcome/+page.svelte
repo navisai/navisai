@@ -13,6 +13,29 @@
     </header>
 
     <section class="section-spacing">
+      <h2 class="text-2xl font-medium">Trust this certificate (mobile)</h2>
+      <p class="text-slate-600 mt-2">
+        Navis uses local HTTPS. On iOS you may need to install and trust the local certificate once.
+      </p>
+      <div class="mt-4 panel">
+        <div class="panel-header">
+          <h3>Download</h3>
+        </div>
+        <div class="panel-body">
+          <a href="/certs/navis.local.crt" class="btn btn-secondary">Download navis.local certificate</a>
+          <ol class="mt-4 list-decimal pl-5 text-slate-600 space-y-2">
+            <li>Open this page on your iPhone (same Wi‑Fi), then tap Download.</li>
+            <li>
+              Install it via Settings → General → VPN &amp; Device Management (or Profiles) → Install.
+            </li>
+            <li>Enable trust: Settings → General → About → Certificate Trust Settings → trust Navis.</li>
+            <li>Return here and continue pairing.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-spacing">
       <h2 class="text-2xl font-medium">Pair your phone</h2>
       <p class="text-slate-600 mt-2">
         Scan this QR code on your phone to start pairing. Pairing requires explicit approval.
@@ -47,4 +70,3 @@
     </section>
   </main>
 </div>
-

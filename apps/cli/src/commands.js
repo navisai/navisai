@@ -49,6 +49,23 @@ async function runMacOSAdminShell(shellCommand) {
   return execAsync(`osascript -e "${escapeAppleScriptString(script)}"`)
 }
 
+async function hasCommand(cmd) {
+  try {
+    await execAsync(`command -v ${cmd}`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function runLinuxAdminShell(shellCommand) {
+  const wrapped = `sh -c '${shellCommand.replaceAll("'", "'\\''")}'`
+  if (await hasCommand('pkexec')) {
+    return execAsync(`pkexec ${wrapped}`)
+  }
+  return execAsync(`sudo ${wrapped}`)
+}
+
 async function installMacOSBridge() {
   const bridgeEntrypoint = resolveBridgeEntrypoint()
   const nodePath = process.execPath
@@ -122,6 +139,58 @@ async function uninstallMacOSBridge() {
   await runMacOSAdminShell(shellCommand)
 }
 
+async function installLinuxBridge() {
+  const bridgeEntrypoint = resolveBridgeEntrypoint()
+  const nodePath = process.execPath
+
+  const localDir = path.join(homedir(), '.navis', 'bridge')
+  const localService = path.join(localDir, 'navisai-bridge.service')
+  const systemService = '/etc/systemd/system/navisai-bridge.service'
+
+  await fs.mkdir(localDir, { recursive: true })
+
+  const service = `[Unit]
+Description=NavisAI Bridge (443 -> 127.0.0.1:47621)
+After=network.target
+
+[Service]
+Type=simple
+Environment=NAVIS_BRIDGE_HOST=0.0.0.0
+Environment=NAVIS_BRIDGE_PORT=443
+Environment=NAVIS_DAEMON_HOST=127.0.0.1
+Environment=NAVIS_DAEMON_PORT=47621
+ExecStart=${nodePath} ${bridgeEntrypoint}
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
+`
+
+  await fs.writeFile(localService, service, 'utf8')
+
+  const shellCommand = [
+    'set -euo pipefail',
+    `install -m 0644 "${localService}" "${systemService}"`,
+    'systemctl daemon-reload',
+    'systemctl enable --now navisai-bridge.service',
+  ].join('; ')
+
+  await runLinuxAdminShell(shellCommand)
+}
+
+async function uninstallLinuxBridge() {
+  const systemService = '/etc/systemd/system/navisai-bridge.service'
+  const shellCommand = [
+    'set -euo pipefail',
+    'systemctl disable --now navisai-bridge.service >/dev/null 2>&1 || true',
+    `rm -f "${systemService}"`,
+    'systemctl daemon-reload',
+  ].join('; ')
+
+  await runLinuxAdminShell(shellCommand)
+}
+
 export async function setupCommand() {
   console.log('NavisAI Setup')
   console.log('=============\n')
@@ -137,14 +206,22 @@ export async function setupCommand() {
   }
 
   const os = platform()
-  if (os !== 'darwin') {
-    console.log('\nSetup is currently implemented for macOS only.')
+  if (os === 'darwin') {
+    console.log('\nInstalling the Navis Bridge (requires an OS admin prompt)...')
+    await installMacOSBridge()
+  } else if (os === 'linux') {
+    console.log('\nInstalling the Navis Bridge (requires admin privileges via pkexec/sudo)...')
+    await installLinuxBridge()
+  } else if (os === 'win32') {
+    console.log('\nWindows setup is not implemented yet.')
+    console.log('See `docs/SETUP.md` for the cross-platform spec.')
+    return
+  } else {
+    console.log(`\nUnsupported platform: ${os}`)
     console.log('See `docs/SETUP.md` for the cross-platform spec.')
     return
   }
 
-  console.log('\nInstalling the Navis Bridge (requires an OS admin prompt)...')
-  await installMacOSBridge()
   console.log('✅ Bridge installed: https://navis.local will use port 443 (forwarded to the daemon).')
   console.log('\nNext:')
   console.log('- Start Navis: navisai up')
@@ -162,14 +239,22 @@ export async function resetCommand() {
   }
 
   const os = platform()
-  if (os !== 'darwin') {
-    console.log('\nReset is currently implemented for macOS only.')
+  if (os === 'darwin') {
+    console.log('Removing the Navis Bridge (requires an OS admin prompt)...')
+    await uninstallMacOSBridge()
+  } else if (os === 'linux') {
+    console.log('Removing the Navis Bridge (requires admin privileges via pkexec/sudo)...')
+    await uninstallLinuxBridge()
+  } else if (os === 'win32') {
+    console.log('\nWindows reset is not implemented yet.')
+    console.log('See `docs/SETUP.md` for the cross-platform spec.')
+    return
+  } else {
+    console.log(`\nUnsupported platform: ${os}`)
     console.log('See `docs/SETUP.md` for the cross-platform spec.')
     return
   }
 
-  console.log('Removing the Navis Bridge (requires an OS admin prompt)...')
-  await uninstallMacOSBridge()
   console.log('✅ Bridge removed.')
 }
 
@@ -304,6 +389,7 @@ export async function doctorCommand() {
   console.log('Running Navis diagnostics...\n')
 
   let allGood = true
+  const os = platform()
 
   // Check Node.js version
   const nodeVersion = process.version
@@ -337,6 +423,29 @@ export async function doctorCommand() {
   } catch (error) {
     console.log(`⚠️  Not reachable at ${CANONICAL_ORIGIN}`)
     console.log(`   ${error.message}`)
+    allGood = false
+  }
+
+  // Bridge status (best-effort)
+  try {
+    if (os === 'darwin') {
+      await execAsync('launchctl print system/com.navisai.bridge >/dev/null 2>&1')
+      console.log('✅ Bridge: launchd service installed (com.navisai.bridge)')
+    } else if (os === 'linux') {
+      const { stdout } = await execAsync('systemctl is-active navisai-bridge.service || true')
+      const status = stdout.trim()
+      if (status === 'active') {
+        console.log('✅ Bridge: systemd service active (navisai-bridge.service)')
+      } else {
+        console.log(`⚠️  Bridge: systemd service not active (${status || 'unknown'})`)
+        allGood = false
+      }
+    } else if (os === 'win32') {
+      console.log('⚠️  Bridge: Windows not implemented yet')
+      allGood = false
+    }
+  } catch {
+    console.log('⚠️  Bridge: unable to determine status')
     allGood = false
   }
 

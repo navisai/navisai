@@ -85,6 +85,10 @@ Examples:
 
 - `POST /pairing/request`  
   - As defined in `PAIRING_PROTOCOL.md`.
+- `POST /pairing/start`  
+  - Alias of pairing request for clients that prefer the “start” endpoint; see `PAIRING_PROTOCOL.md`.
+- `GET /certs/navis.local.crt`  
+  - Public certificate download endpoint to support mobile trust UX.
 
 ---
 

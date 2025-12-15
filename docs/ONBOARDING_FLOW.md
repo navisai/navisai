@@ -60,6 +60,7 @@ Optionally offer to open the browser (opt-in or interactive prompt), rather than
 ### 3.1 Welcome Screen
 - “Navis is running locally”
 - Explanation of local-first model
+- If needed, show a guided mobile certificate trust step and provide a direct download link (e.g. `GET /certs/navis.local.crt`).
 
 ### 3.2 How Navis Works
 - Visual overview:
