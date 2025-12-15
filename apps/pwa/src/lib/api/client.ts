@@ -249,6 +249,36 @@ class ApiClient {
     throw new Error('Not implemented')
   }
 
+  async startPairing(payload: {
+    pairingToken: string
+    clientName: string
+    clientDeviceInfo?: Record<string, any>
+  }) {
+    const body = JSON.stringify(payload)
+    const response = await this.request('POST', NAVIS_PATHS.pairing.start, {
+      body,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => null)
+      throw new Error(error?.error || `HTTP ${response.status}`)
+    }
+
+    const data = await response.json()
+    if (!data.deviceId || !data.deviceSecret) {
+      throw new Error('Pairing response missing credentials')
+    }
+
+    await this.setDeviceCredentials({
+      deviceId: data.deviceId,
+      deviceSecret: data.deviceSecret
+    })
+
+    return data
+  }
+
   async indexPaths(paths: string[]) {
     const payload = JSON.stringify({ paths })
     const response = await this.request('POST', NAVIS_PATHS.discovery.index, {
