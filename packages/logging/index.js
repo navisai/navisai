@@ -1,119 +1,74 @@
 /**
- * NavisAI Logging Utility
- * Provides structured logging with configurable levels and outputs
+ * Navis AI Logging Utilities
+ * Centralized logging for the Navis ecosystem
  */
 
-import pino from 'pino'
-import pretty from 'pino-pretty'
+class Logger {
+  constructor(name = 'navis') {
+    this.name = name
+  }
 
-// Create pretty logger for development
-const prettyLogger = pino(
-  pretty({
-    colorize: true,
-    translateTime: 'HH:MM:ss Z',
-    ignore: 'pid,hostname',
-    messageFormat: '{service} | {msg}',
-    customPrettifiers: {
-      level: (label) => {
-        const level = label.toUpperCase()
-        const colors = {
-          TRACE: '\x1b[90m', // Gray
-          DEBUG: '\x1b[36m', // Cyan
-          INFO: '\x1b[32m',  // Green
-          WARN: '\x1b[33m',  // Yellow
-          ERROR: '\x1b[31m', // Red
-          FATAL: '\x1b[41m\x1b[37m', // Red background
-        }
-        const reset = '\x1b[0m'
-        return `${colors[level] || ''}${level}${reset}`
-      }
+  log(level, message, meta = {}) {
+    const timestamp = new Date().toISOString()
+    const logEntry = {
+      timestamp,
+      level: level.toUpperCase(),
+      name: this.name,
+      message,
+      ...meta
     }
-  })
-)
 
-// Map string levels to pino levels
-const LEVELS = {
-  trace: pino.levelValues.trace,
-  debug: pino.levelValues.debug,
-  info: pino.levelValues.info,
-  warn: pino.levelValues.warn,
-  error: pino.levelValues.error,
-  fatal: pino.levelValues.fatal,
-  silent: pino.levelValues.silent
-}
+    // Format for console output
+    const prefix = `[${timestamp}] ${level.toUpperCase()} ${this.name}:`
 
-/**
- * Get a logger instance for a specific service
- */
-export function getLogger(service = 'navisai', level = process.env.NAVIS_LOG_LEVEL || 'info') {
-  return {
-    trace: (msg, ...args) => prettyLogger.trace({ service }, msg, ...args),
-    debug: (msg, ...args) => prettyLogger.debug({ service }, msg, ...args),
-    info: (msg, ...args) => prettyLogger.info({ service }, msg, ...args),
-    warn: (msg, ...args) => prettyLogger.warn({ service }, msg, ...args),
-    error: (msg, ...args) => prettyLogger.error({ service }, msg, ...args),
-    fatal: (msg, ...args) => prettyLogger.fatal({ service }, msg, ...args),
+    switch (level) {
+      case 'error':
+        console.error(prefix, message, meta)
+        break
+      case 'warn':
+        console.warn(prefix, message, meta)
+        break
+      case 'info':
+        console.info(prefix, message, meta)
+        break
+      case 'debug':
+        console.debug(prefix, message, meta)
+        break
+      default:
+        console.log(prefix, message, meta)
+    }
 
-    // Extended logging methods
-    child: (bindings) => ({
-      trace: (msg, ...args) => prettyLogger.trace({ service, ...bindings }, msg, ...args),
-      debug: (msg, ...args) => prettyLogger.debug({ service, ...bindings }, msg, ...args),
-      info: (msg, ...args) => prettyLogger.info({ service, ...bindings }, msg, ...args),
-      warn: (msg, ...args) => prettyLogger.warn({ service, ...bindings }, msg, ...args),
-      error: (msg, ...args) => prettyLogger.error({ service, ...bindings }, msg, ...args),
-      fatal: (msg, ...args) => prettyLogger.fatal({ service, ...bindings }, msg, ...args),
-    })
+    return logEntry
+  }
+
+  error(message, meta) {
+    return this.log('error', message, meta)
+  }
+
+  warn(message, meta) {
+    return this.log('warn', message, meta)
+  }
+
+  info(message, meta) {
+    return this.log('info', message, meta)
+  }
+
+  debug(message, meta) {
+    return this.log('debug', message, meta)
+  }
+
+  child(name) {
+    return new Logger(`${this.name}:${name}`)
   }
 }
 
-/**
- * Create a logger for a specific module
- */
-export function createLogger(module, options = {}) {
-  const service = `${options.service || 'navisai'}:${module}`
-  return getLogger(service, options.level)
-}
+// Create default logger instance
+export const logger = new Logger()
 
-/**
- * Default logger instance
- */
-export const logger = getLogger()
+// Export the Logger class for creating custom loggers
+export { Logger }
 
-/**
- * Set global log level
- */
-export function setLevel(level) {
-  if (typeof level === 'string' && LEVELS.hasOwnProperty(level.toLowerCase())) {
-    prettyLogger.level = LEVELS[level.toLowerCase()]
-  }
-}
-
-/**
- * Get current log level
- */
-export function getLevel() {
-  return Object.keys(LEVELS).find(key => LEVELS[key] === prettyLogger.level) || 'unknown'
-}
-
-/**
- * Create a silent logger (for testing)
- */
-export function getSilentLogger() {
-  const silent = pino({ level: 'silent' })
-  return {
-    trace: () => { },
-    debug: () => { },
-    info: () => { },
-    warn: () => { },
-    error: () => { },
-    fatal: () => { },
-    child: () => ({
-      trace: () => { },
-      debug: () => { },
-      info: () => { },
-      warn: () => { },
-      error: () => { },
-      fatal: () => { }
-    })
-  }
+// Export a simple function for quick logging
+export function log(level, message, meta) {
+  return logger.log(level, message, meta)
 }

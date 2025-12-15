@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to Navis AI</title>
+    <style>
+        :root {
+            --navy: #0E2A47;
+            --slate-50: #F8FAFC;
+            --slate-100: #F1F5F9;
+            --slate-200: #E2E8F0;
+            --slate-300: #CBD5E1;
+            --slate-400: #94A3B8;
+            --slate-500: #64748B;
+            --slate-600: #475569;
+            --slate-700: #334155;
+            --slate-800: #1E293B;
+            --slate-900: #0F172A;
+            --teal-500: #14B8A6;
+            --teal-600: #0D9488;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, var(--navy) 0%, #1a3a5c 100%);
+            min-height: 100vh;
+            color: var(--slate-100);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 60px 40px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #fff 0%, var(--teal-500) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 1.25rem;
+            color: var(--slate-300);
+            margin-bottom: 40px;
+            line-height: 1.8;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 30px;
+            margin: 40px 0;
+        }
+
+        .feature {
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .feature h3 {
+            font-size: 1.1rem;
+            margin-bottom: 8px;
+            color: var(--slate-100);
+        }
+
+        .feature p {
+            font-size: 0.9rem;
+            color: var(--slate-400);
+        }
+
+        .actions {
+            margin-top: 40px;
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 16px 32px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--teal-500) 0%, var(--teal-600) 100%);
+            color: white;
+            box-shadow: 0 4px 14px rgba(20, 184, 166, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(20, 184, 166, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .status {
+            margin-top: 40px;
+            padding: 20px;
+            background: rgba(20, 184, 166, 0.1);
+            border-radius: 10px;
+            border: 1px solid rgba(20, 184, 166, 0.3);
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--teal-500);
+            font-weight: 600;
+        }
+
+        .pulse {
+            width: 10px;
+            height: 10px;
+            background: var(--teal-500);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        @media (max-width: 640px) {
+            h1 { font-size: 2rem; }
+            .container { padding: 40px 20px; }
+            .features { grid-template-columns: 1fr; }
+            .actions { flex-direction: column; align-items: center; }
+            .btn { width: 100%; max-width: 300px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Navis AI</h1>
+        <p class="subtitle">
+            Your local-first developer control plane is ready.<br>
+            Monitor and manage your development environment from anywhere.
+        </p>
+
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">📱</div>
+                <h3>Mobile PWA</h3>
+                <p>Access your dev environment from your phone with our mobile-first interface</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🔍</div>
+                <h3>Project Discovery</h3>
+                <p>Automatically detect and classify all your development projects</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">✅</div>
+                <h3>Approval System</h3>
+                <p>Human-in-the-loop oversight for all automated actions</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🔒</div>
+                <h3>Local & Secure</h3>
+                <p>All data stays local with HTTPS encryption and device pairing</p>
+            </div>
+        </div>
+
+        <div class="actions">
+            <a href="/pairing" class="btn btn-primary">
+                <span>📲</span>
+                Pair Your Device
+            </a>
+            <a href="/" class="btn btn-secondary">
+                <span>🚀</span>
+                Open Navis
+            </a>
+        </div>
+
+        <div class="status">
+            <div class="status-indicator">
+                <span class="pulse"></span>
+                Navis daemon is running
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Check if PWA is built and available
+        fetch('/').then(response => {
+            if (response.ok) {
+                document.querySelector('.btn-secondary').style.display = 'inline-flex';
+            }
+        }).catch(() => {
+            // PWA not available, hide button
+            document.querySelector('.btn-secondary').style.display = 'none';
+        });
+    </script>
+</body>
+</html>

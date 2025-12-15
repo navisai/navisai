@@ -3,8 +3,9 @@
  * Handles communication with the Navis daemon
  */
 
-const API_BASE = 'http://127.0.0.1:3415'
-const WS_URL = 'ws://127.0.0.1:3415'
+// API base URLs - Use navis.local for HTTPS as specified in architecture
+const API_BASE = 'https://navis.local:3415'
+const WS_URL = 'wss://navis.local:3415/ws'
 
 export interface Project {
   id: string
