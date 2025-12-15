@@ -10,6 +10,10 @@
   "scripts": {
     "dev": "pnpm --filter @navisai/pwa build && pnpm --filter @navisai/daemon dev",
     "dev:standalone-pwa": "pnpm --filter @navisai/pwa dev:standalone",
+    "verify:arch": "node scripts/verify-architecture.mjs",
+    "verify": "pnpm verify:arch && pnpm format:check && pnpm --filter @navisai/pwa check",
+    "hooks:install": "node scripts/install-git-hooks.mjs install",
+    "hooks:uninstall": "node scripts/install-git-hooks.mjs uninstall",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "format": "pnpm -r format",

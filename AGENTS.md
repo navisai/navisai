@@ -60,6 +60,7 @@ apps/
   daemon/        # Control plane (authoritative)
   cli/           # navisai CLI
   pwa/           # SvelteKit PWA
+  setup-app/     # Apple-like setup helper (GUI)
 
 packages/
   db/            # Drizzle ORM + SQLite (native driver optional)
@@ -71,6 +72,9 @@ packages/
 
 docs/
   *.md           # Architecture, pairing, IPC, auth, security specs
+
+scripts/
+  *.mjs          # Local guardrails (verify + git hooks)
 ```
 
 Folder boundaries are intentional and must be respected.  
@@ -141,6 +145,7 @@ Run only commands that exist in the relevant `package.json`.
 Notes:
 - Prefer `pnpm --filter <pkg> <script>` over `npx` or ad-hoc global tooling.
 - When a command requires network access or OS privileges, it must be tied to an explicit user action (setup/reset/doctor) and surfaced clearly in UX/logs.
+- Before committing, run `pnpm verify` (recommended) or install local enforcement via `pnpm hooks:install`.
 
 ### Install
 ```bash
@@ -236,6 +241,7 @@ Logs are part of the UX for a local control plane.
 5. **Verify**
    - `pnpm install` succeeds cleanly
    - Touched apps still start/build
+   - Run `pnpm verify` before committing (recommended) or install `pnpm hooks:install` once to enforce locally
 
 6. **Create Detailed Commit**
    - Include summary of changes
