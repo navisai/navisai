@@ -21,6 +21,9 @@ Requirements:
 - Installing packages must not auto-start services.
 - Privileged/system changes only occur during explicit, user-approved commands (e.g. `navisai setup`).
 
+macOS user-friendly setup:
+- The preferred “Apple-like” path is a signed installer / setup app that performs the one-time bridge install with a standard macOS authentication sheet (see `MACOS_SETUP_EXPERIENCE.md`).
+
 ---
 
 ## 2. Published packages (OSS)
@@ -96,4 +99,3 @@ Publishing:
 - `pnpm -r publish --access public`
 
 See: `RELEASE_PROCESS.md`
-

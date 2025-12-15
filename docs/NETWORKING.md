@@ -76,6 +76,9 @@ Implementation note:
 
 This step may require admin privileges. It must be explicit, reversible, and never performed silently.
 
+Preferred macOS UX:
+- A signed installer or setup app that requests admin approval once and installs the bridge (see `MACOS_SETUP_EXPERIENCE.md`).
+
 ### 4.2 Daily use (no sudo)
 
 `navisai up`:

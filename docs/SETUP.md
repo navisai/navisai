@@ -3,6 +3,7 @@ Version: v0.1
 Status: Draft (Implementable target)
 
 Canonical networking model: see `NETWORKING.md`.
+Preferred macOS UX: see `MACOS_SETUP_EXPERIENCE.md`.
 
 ---
 
@@ -26,6 +27,9 @@ This step is explicit, user-consented, and reversible.
 ---
 
 ## 2. One-time setup command
+
+Most users should use the macOS installer / setup app described in `MACOS_SETUP_EXPERIENCE.md`.
+The CLI setup command exists for power users and CI-like environments.
 
 Install the CLI:
 

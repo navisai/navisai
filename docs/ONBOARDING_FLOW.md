@@ -34,6 +34,10 @@ Setup responsibilities (explicit user consent; may require admin privileges):
 
 Setup is never silent and is fully reversible.
 
+Preferred macOS UX:
+- Users complete this “machine setup” via a signed installer or setup app (see `MACOS_SETUP_EXPERIENCE.md`).
+- The CLI remains available for power users and development.
+
 ---
 
 # 3. Daily Startup (No sudo)
