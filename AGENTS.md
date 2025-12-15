@@ -211,6 +211,7 @@ Logs are part of the UX for a local control plane.
 - Stop and ask if requirements are ambiguous
 - Do not speculate about premium features
 - Treat this file as binding
+- **No attribution**: Do not add AI-generated attribution to commits, messages, or code
 
 ---
 
