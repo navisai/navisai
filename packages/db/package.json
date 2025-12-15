@@ -1,28 +1,23 @@
 {
   "name": "@navisai/db",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
-    "./db": "./db.js",
-    "./schema": "./schema.js"
+    "./schema": "./schema.js",
+    "./repositories": "./repositories.js"
   },
   "dependencies": {
-    "drizzle-orm": "^0.30.0"
-  },
-  "optionalDependencies": {
-    "better-sqlite3": "^9.4.0"
+    "drizzle-orm": "^0.35.0",
+    "nanoid": "^5.0.7",
+    "@navisai/logging": "workspace:*"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.31.8"
+    "@types/node": "^22.0.0"
   },
-  "scripts": {
-    "generate": "drizzle-kit generate",
-    "migrate": "drizzle-kit migrate",
-    "push": "drizzle-kit push"
-  },
-  "peerDependencies": {
-    "better-sqlite3": "^9.4.0"
+  "optionalDependencies": {
+    "better-sqlite3": "^9.5.0"
   }
 }
