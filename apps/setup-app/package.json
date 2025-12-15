@@ -1,0 +1,9 @@
+{
+  "name": "@navisai/setup-app",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "navisai-setup-app": "index.js"
+  },
+  "dependencies": {}
+}
