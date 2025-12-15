@@ -224,7 +224,7 @@ Daemon verifies signature and checks `devices.isRevoked`.
 - Device revocation:
   - `navisai devices revoke <deviceId>`
   - Marks `devices.isRevoked = 1`.
-  - All future requests from that device are rejected.
+  - All future requests from that device are denied.
 
 ---
 

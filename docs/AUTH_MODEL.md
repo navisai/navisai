@@ -105,7 +105,9 @@ For convenience:
 - Public endpoints:
   - `/status` (minimal info)
   - `/welcome` (onboarding shell)
+  - `/certs/navis.local.crt` (certificate download for mobile trust UX)
   - `/pairing/request` (requires valid pairingToken)
+  - `/pairing/start` (alias of pairing request)
 - Auth-required endpoints:
   - `/projects/*`
   - `/sessions/*`

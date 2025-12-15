@@ -183,10 +183,13 @@ GET   /status
 GET   /projects
 GET   /projects/:id
 GET   /sessions
+GET   /approvals
+GET   /approvals/pending
 POST  /approvals/:id/approve
 POST  /approvals/:id/reject
 POST  /pairing/request
-POST  /pairing/approve
+POST  /pairing/start
+GET   /certs/navis.local.crt
 ```
 
 ## 4.2 WebSocket Events
@@ -194,10 +197,10 @@ POST  /pairing/approve
 ```
 terminal.output
 session.update
-acp.message
 approval.request
+approval.updated
 project.updated
-device.paired
+daemon.status
 ```
 
 All events come stamped with:
