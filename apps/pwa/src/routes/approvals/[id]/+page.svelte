@@ -1,140 +1,119 @@
-<script>
-	import { page } from '$app/stores'
-	import { approvalsStore, pendingApprovals, isResolving } from '$lib/stores/approvals'
-	import { projects } from '$lib/stores/projects'
+<script lang="ts">
+  import { onMount } from 'svelte'
+  import { page } from '$app/stores'
+  import { apiClient, type Approval } from '$lib/api/client'
+  import { approvalsStore, isResolving } from '$lib/stores/approvals'
 
-	const { id } = $page.params
+  let approval: Approval | null = null
+  let loading = true
+  let error: string | null = null
 
-	$: approval = $pendingApprovals.find(a => a.id === id)
-	$: project = approval?.projectId ? $projects.find(p => p.id === approval.projectId) : null
+  $: approvalId = $page.params.id ?? ''
+  $: resolving = approvalId ? $isResolving.includes(approvalId) : false
 
-	async function handleApprove() {
-		if (!approval) return
-		try {
-			await approvalsStore.approve(approval.id)
-		} catch (error) {
-			console.error('Failed to approve:', error)
-		}
-	}
+  async function load() {
+    loading = true
+    error = null
+    try {
+      if (!approvalId) throw new Error('Missing approval id')
+      approval = await apiClient.getApproval(approvalId)
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to load approval'
+    } finally {
+      loading = false
+    }
+  }
 
-	async function handleDeny() {
-		if (!approval) return
-		try {
-			await approvalsStore.reject(approval.id)
-		} catch (error) {
-			console.error('Failed to reject:', error)
-		}
-	}
+  async function handleAction(action: 'approve' | 'reject') {
+    if (!approval) return
+    error = null
+    try {
+      await approvalsStore.resolveApproval(approval.id, action)
+      await load()
+    } catch (e) {
+      error = e instanceof Error ? e.message : `Failed to ${action} approval`
+    }
+  }
+
+  onMount(load)
 </script>
 
 <svelte:head>
-  <title>Approval {id} - Navis AI</title>
+  <title>Approval - Navis AI</title>
 </svelte:head>
 
 <div class="page-padding">
   <main class="max-w-4xl mx-auto py-12">
-    {#if approval}
-      <div class="section-spacing">
-        <div class="flex items-center gap-3 mb-6">
-          <a href="/" class="text-navy-600 hover:text-navy-800" aria-label="Go back to dashboard">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-          </a>
-          <h1 class="text-2xl font-medium">Approval Request</h1>
-          <span class="px-2 py-1 bg-amber-100 text-amber-700 rounded-full text-sm"> Pending </span>
+    <div class="flex items-center justify-between gap-4 mb-6">
+      <div>
+        <h1 class="text-3xl font-semibold">Approval</h1>
+        <p class="text-slate-600 mt-1">Review and approve or deny this request.</p>
+      </div>
+      <a href="/approvals" class="btn btn-secondary">Back</a>
+    </div>
+
+    {#if error}
+      <div class="panel border border-red-200 bg-red-50">
+        <div class="panel-body">
+          <p class="text-red-700 text-sm">{error}</p>
         </div>
+      </div>
+    {/if}
 
-        <!-- Approval Details -->
-        <div class="panel">
-          <div class="panel-header">
-            <h3>{approval.type}</h3>
-            <p class="text-sm text-slate-600">
-              Created {new Date(approval.createdAt).toLocaleString()}
-            </p>
+    {#if loading}
+      <div class="text-center py-12">
+        <div
+          class="w-8 h-8 border-4 border-navy-100 border-t-navy-600 rounded-full animate-spin mx-auto mb-3"
+        ></div>
+        <p class="text-slate-600">Loading approval...</p>
+      </div>
+    {:else if approval}
+      <div class="panel">
+        <div class="panel-header">
+          <div class="flex items-center justify-between w-full">
+            <h2 class="text-lg font-medium">{approval.type}</h2>
+            <span
+              class="text-xs px-2 py-1 rounded-full {approval.status === 'pending'
+                ? 'bg-amber-100 text-amber-700'
+                : approval.status === 'approved'
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-slate-100 text-slate-700'}"
+            >
+              {approval.status}
+            </span>
           </div>
-          <div class="panel-body space-y-4">
-            {#if project}
-              <div class="p-3 bg-slate-50 rounded-lg">
-                <p class="text-sm font-medium text-slate-900">Project</p>
-                <p class="text-sm text-slate-600">{project.name}</p>
-                <p class="text-xs text-slate-500 font-mono mt-1">{project.path}</p>
-              </div>
-            {/if}
+        </div>
+        <div class="panel-body">
+          <p class="text-sm text-slate-600">
+            Created {new Date(approval.createdAt).toLocaleString()}
+          </p>
 
-            <div>
-              <h4 class="font-medium text-slate-900 mb-2">Action Details</h4>
-              <div class="p-4 bg-slate-50 rounded-lg font-mono text-sm whitespace-pre-wrap">
-                {approval.payload}
-              </div>
-            </div>
+          <div class="mt-4">
+            <h3 class="text-sm font-medium text-slate-900">Payload</h3>
+            <pre class="mt-2 p-3 bg-slate-50 rounded-lg font-mono text-sm overflow-auto">{approval.payload}</pre>
+          </div>
 
-            <!-- Action Buttons -->
-            <div class="flex gap-3 pt-4 border-t border-slate-200">
-              <button
-                class="btn btn-approve"
-                on:click={handleApprove}
-                disabled={$isResolving.includes(approval.id)}
-              >
-                {#if $isResolving.includes(approval.id)}
-                  Processing...
-                {:else}
-                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
-                  Approve
-                {/if}
+          {#if approval.status === 'pending'}
+            <div class="mt-6 flex flex-wrap gap-3">
+              <button class="btn btn-primary" on:click={() => handleAction('approve')} disabled={resolving}>
+                {resolving ? 'Working...' : 'Approve'}
               </button>
-              <button
-                class="btn btn-deny"
-                on:click={handleDeny}
-                disabled={$isResolving.includes(approval.id)}
-              >
-                {#if $isResolving.includes(approval.id)}
-                  Processing...
-                {:else}
-                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                  Deny
-                {/if}
+              <button class="btn btn-secondary" on:click={() => handleAction('reject')} disabled={resolving}>
+                {resolving ? 'Working...' : 'Deny'}
               </button>
             </div>
-          </div>
+          {:else}
+            <div class="mt-6">
+              <a href="/approvals" class="btn btn-secondary">Back to Approvals</a>
+            </div>
+          {/if}
         </div>
       </div>
     {:else}
       <div class="text-center py-12">
-        <div
-          class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4"
-        >
-          <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-            />
-          </svg>
-        </div>
         <h3 class="text-lg font-medium text-slate-900 mb-1">Approval not found</h3>
-        <p class="text-slate-600">This approval may have been resolved or the ID is incorrect</p>
-        <a href="/" class="btn btn-secondary mt-4">Back to Dashboard</a>
+        <p class="text-slate-600">It may have been resolved or expired.</p>
+        <a href="/approvals" class="btn btn-secondary mt-4">Back to Approvals</a>
       </div>
     {/if}
   </main>

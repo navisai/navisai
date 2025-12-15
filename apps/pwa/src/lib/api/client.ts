@@ -148,6 +148,12 @@ class ApiClient {
     return data.approvals || []
   }
 
+  async getApproval(id: string): Promise<Approval> {
+    const response = await fetch(`${API_BASE}${NAVIS_PATHS.approvals.byId(id)}`)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    return response.json()
+  }
+
   async resolveApproval(id: string, action: 'approve' | 'reject'): Promise<Approval> {
     const path =
       action === 'approve' ? NAVIS_PATHS.approvals.approve(id) : NAVIS_PATHS.approvals.reject(id)

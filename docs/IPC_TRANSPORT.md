@@ -82,6 +82,8 @@ Examples:
 
 - `POST /approvals/:id/approve`  
 - `POST /approvals/:id/reject`  
+- `GET /approvals/:id`  
+  - Fetch a single approval (used by the PWA approval detail view).
 
 - `POST /pairing/request`  
   - As defined in `PAIRING_PROTOCOL.md`.

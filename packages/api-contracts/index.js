@@ -31,6 +31,7 @@ export const NAVIS_PATHS = /** @type {const} */ ({
   approvals: {
     list: '/approvals',
     pending: '/approvals/pending',
+    byId: (id) => `/approvals/${encodeURIComponent(id)}`,
     approve: (id) => `/approvals/${encodeURIComponent(id)}/approve`,
     reject: (id) => `/approvals/${encodeURIComponent(id)}/reject`,
   },

@@ -20,6 +20,7 @@ export const NAVIS_PATHS: {
   approvals: {
     list: '/approvals'
     pending: '/approvals/pending'
+    byId: (id: string) => string
     approve: (id: string) => string
     reject: (id: string) => string
   }
