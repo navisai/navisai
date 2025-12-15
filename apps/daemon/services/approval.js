@@ -6,6 +6,7 @@
 export class ApprovalService {
   constructor() {
     this.approvals = new Map()
+    this.wsManager = null
   }
 
   async initialize() {
@@ -38,6 +39,7 @@ export class ApprovalService {
     }
 
     this.approvals.set(approval.id, approval)
+    this.emit('approval.request', { approval })
     return approval
   }
 
@@ -54,7 +56,7 @@ export class ApprovalService {
     approval.status = 'approved'
     approval.resolvedAt = new Date().toISOString()
     this.approvals.set(id, approval)
-
+    this.emit('approval.updated', { approval })
     return approval
   }
 
@@ -71,7 +73,7 @@ export class ApprovalService {
     approval.status = 'denied'
     approval.resolvedAt = new Date().toISOString()
     this.approvals.set(id, approval)
-
+    this.emit('approval.updated', { approval })
     return approval
   }
 
@@ -89,5 +91,14 @@ export class ApprovalService {
 
   generateId() {
     return 'approval_' + Math.random().toString(36).substr(2, 9)
+  }
+
+  setWebSocketManager(wsManager) {
+    this.wsManager = wsManager
+  }
+
+  emit(type, payload = {}) {
+    if (!this.wsManager) return
+    this.wsManager.broadcast({ type, ...payload }, 'approvals')
   }
 }

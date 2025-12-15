@@ -85,8 +85,19 @@ function createApprovalsStore() {
   }
 
   // Listen for approval updates from WebSocket
-  apiClient.on('approval_resolved', (data: any) => {
-    removeApproval(data.approval.id)
+  apiClient.on('approval.request', (data: any) => {
+    if (data?.approval) {
+      addApproval(data.approval)
+    }
+  })
+
+  apiClient.on('approval.updated', (data: any) => {
+    if (data?.approval) {
+      update(state => ({
+        ...state,
+        pending: state.pending.filter(it => it.id !== data.approval.id),
+      }))
+    }
   })
 
   return {

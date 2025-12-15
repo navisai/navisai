@@ -140,6 +140,7 @@ export class NavisDaemon {
       // Setup WebSocket
       this.wsManager = new WebSocketManager(this.fastify)
       await this.wsManager.initialize()
+      this.approvalService?.setWebSocketManager(this.wsManager)
 
       // Start the server
       await this.fastify.listen({ port, host })
