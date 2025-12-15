@@ -191,6 +191,39 @@ async function uninstallLinuxBridge() {
   await runLinuxAdminShell(shellCommand)
 }
 
+function escapePowerShellCommand(command) {
+  return command.replace(/`/g, '``').replace(/"/g, '`"')
+}
+
+async function runWindowsAdminCommand(command) {
+  const escapedCommand = escapePowerShellCommand(command)
+  const psCommand = `Start-Process -FilePath powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',"${escapedCommand}" -Verb RunAs -Wait`
+  return execAsync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCommand}"`)
+}
+
+async function installWindowsBridge() {
+  const bridgeEntrypoint = resolveBridgeEntrypoint()
+  const nodePath = process.execPath
+  const binPath = `"${nodePath}" "${bridgeEntrypoint}"`
+  const commands = [
+    'sc stop navisai-bridge 2>$null || true',
+    'sc delete navisai-bridge 2>$null || true',
+    `sc create navisai-bridge binPath= "${binPath}" start= auto`,
+    'sc config navisai-bridge obj= LocalSystem',
+    'sc description navisai-bridge "Navis AI bridge (443 -> 127.0.0.1:47621)"',
+    'sc start navisai-bridge',
+  ].join('; ')
+  await runWindowsAdminCommand(commands)
+}
+
+async function uninstallWindowsBridge() {
+  const commands = [
+    'sc stop navisai-bridge 2>$null || true',
+    'sc delete navisai-bridge 2>$null || true'
+  ].join('; ')
+  await runWindowsAdminCommand(commands)
+}
+
 export async function setupCommand() {
   console.log('NavisAI Setup')
   console.log('=============\n')
@@ -213,9 +246,8 @@ export async function setupCommand() {
     console.log('\nInstalling the Navis Bridge (requires admin privileges via pkexec/sudo)...')
     await installLinuxBridge()
   } else if (os === 'win32') {
-    console.log('\nWindows setup is not implemented yet.')
-    console.log('See `docs/SETUP.md` for the cross-platform spec.')
-    return
+    console.log('\nInstalling the Navis Bridge (requires admin privileges via UAC prompt)...')
+    await installWindowsBridge()
   } else {
     console.log(`\nUnsupported platform: ${os}`)
     console.log('See `docs/SETUP.md` for the cross-platform spec.')
@@ -246,9 +278,8 @@ export async function resetCommand() {
     console.log('Removing the Navis Bridge (requires admin privileges via pkexec/sudo)...')
     await uninstallLinuxBridge()
   } else if (os === 'win32') {
-    console.log('\nWindows reset is not implemented yet.')
-    console.log('See `docs/SETUP.md` for the cross-platform spec.')
-    return
+    console.log('Removing the Navis Bridge (requires admin privileges via UAC prompt)...')
+    await uninstallWindowsBridge()
   } else {
     console.log(`\nUnsupported platform: ${os}`)
     console.log('See `docs/SETUP.md` for the cross-platform spec.')
@@ -441,8 +472,18 @@ export async function doctorCommand() {
         allGood = false
       }
     } else if (os === 'win32') {
-      console.log('⚠️  Bridge: Windows not implemented yet')
-      allGood = false
+      try {
+        const { stdout } = await execAsync('sc query navisai-bridge')
+        if (stdout.includes('RUNNING')) {
+          console.log('✅ Bridge: Windows service active (navisai-bridge)')
+        } else {
+          console.log('⚠️  Bridge: Windows service installed but not running')
+          allGood = false
+        }
+      } catch {
+        console.log('⚠️  Bridge: Windows service not installed (run navisai setup)')
+        allGood = false
+      }
     }
   } catch {
     console.log('⚠️  Bridge: unable to determine status')

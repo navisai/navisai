@@ -64,7 +64,7 @@ Current implementation status:
 
 - macOS: implemented via a `launchd` LaunchDaemon (`com.navisai.bridge`) that runs `navisai-bridge` and binds 443 (admin prompt required once).
 - Linux: implemented via a `systemd` service (`navisai-bridge.service`) installed by `navisai setup` (admin privileges via `pkexec` if available, otherwise `sudo`).
-- Windows: not implemented yet (spec-only).
+- Windows: implemented via a Windows service (`navisai-bridge`) created by `navisai setup` (UAC prompt + `sc` service for automatic 443 → 47621 forwarding).
 
 ### 3.2 mDNS/Bonjour for `navis.local`
 
