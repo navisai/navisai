@@ -9,6 +9,7 @@ import {
   logsCommand,
   scanCommand,
   indexCommand,
+  pairCommand,
 } from './commands.js'
 
 // CLI configuration
@@ -54,6 +55,12 @@ program
   .command('index <paths...>')
   .description('Index specific paths for projects')
   .action(indexCommand)
+
+program
+  .command('pair')
+  .description('Initiate device pairing for Navis')
+  .option('-r, --re-pair', 'Force re-pairing of all devices')
+  .action(pairCommand)
 
 // Parse command line arguments
 program.parse()

@@ -34,7 +34,8 @@ export async function upCommand() {
     const startedProcess = await findDaemonProcess()
     if (startedProcess) {
       console.log('✅ Navis daemon started successfully')
-      console.log('🌐 Access at: http://127.0.0.1:3415')
+      console.log('🌐 Access at: https://navis.local:3415')
+      console.log('📱 Onboarding: https://navis.local:3415/welcome')
     } else {
       console.log('❌ Failed to start daemon')
       if (stderr) console.error(stderr)
@@ -86,7 +87,7 @@ export async function statusCommand() {
 
       // Try to get status from API
       try {
-        const response = await fetch('http://127.0.0.1:3415/status')
+        const response = await fetch('https://navis.local:3415/api/status')
         if (response.ok) {
           const status = await response.json()
           console.log('\nDaemon Status:')
@@ -207,7 +208,7 @@ export async function scanCommand(path, options = {}) {
     }
 
     // Call daemon API to scan
-    const response = await fetch('http://127.0.0.1:3415/api/discovery/scan', {
+    const response = await fetch('https://navis.local:3415/api/discovery/scan', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -281,7 +282,7 @@ export async function indexCommand(paths, options = {}) {
     }
 
     // Call daemon API to index
-    const response = await fetch('http://127.0.0.1:3415/api/discovery/index', {
+    const response = await fetch('https://navis.local:3415/api/discovery/index', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -316,6 +317,77 @@ export async function indexCommand(paths, options = {}) {
     return result
   } catch (error) {
     console.error('❌ Index failed:', error.message)
+    process.exit(1)
+  }
+}
+
+export async function pairCommand(options = {}) {
+  try {
+    console.log('🔗 Initiating Navis device pairing...\n')
+
+    // Check if daemon is running
+    const daemonProcess = await findDaemonProcess()
+    if (!daemonProcess) {
+      console.log('❌ Navis daemon is not running. Please run `navisai up` first.')
+      process.exit(1)
+    }
+
+    // If re-pairing is requested, revoke existing devices first
+    if (options.rePair) {
+      console.log('🔄 Revoking existing pairings...')
+      try {
+        const devicesResponse = await fetch('https://navis.local:3415/api/devices')
+        if (devicesResponse.ok) {
+          const { devices } = await devicesResponse.json()
+          for (const device of devices) {
+            if (!device.isRevoked) {
+              await fetch(`https://navis.local:3415/api/devices/${device.id}/revoke`, {
+                method: 'POST'
+              })
+              console.log(`   Revoked: ${device.name}`)
+            }
+          }
+        }
+      } catch (error) {
+        console.log('⚠️  Could not revoke existing devices:', error.message)
+      }
+    }
+
+    // Get pairing information from daemon
+    const response = await fetch('https://navis.local:3415/pairing/qr')
+    if (!response.ok) {
+      console.log('❌ Failed to get pairing information')
+      process.exit(1)
+    }
+
+    const { pairingData } = await response.json()
+
+    console.log('✅ Pairing session started\n')
+    console.log('Pairing Options:')
+    console.log('================\n')
+    console.log('1. Scan QR Code:')
+    console.log('   - Open your phone camera')
+    console.log('   - Scan the QR code at: https://navis.local/pairing\n')
+    console.log('\n2. Pairing Code:')
+    console.log('   - Open Navis app on your phone')
+    console.log('   - Go to Settings > Pair New Device')
+    console.log('   - Enter pairing code:', pairingData.id.toUpperCase(), '\n')
+    console.log('3. Direct URL:')
+    console.log('   - On your phone, visit: https://navis.local')
+    console.log('   - Accept the security certificate')
+    console.log('   - Follow the on-screen pairing instructions\n')
+
+    console.log('🌐 Pairing URL: https://navis.local/pairing')
+    console.log('📱 Pairing Code:', pairingData.id.toUpperCase())
+    console.log('\nWaiting for device to pair... (Press Ctrl+C to cancel)')
+
+    // In a real implementation, this would monitor for pairing events
+    // For now, just show instructions
+    console.log('\nNote: Real-time pairing status monitoring not yet implemented')
+    console.log('      Check https://navis.local/welcome for pairing status')
+
+  } catch (error) {
+    console.error('❌ Pairing failed:', error.message)
     process.exit(1)
   }
 }
