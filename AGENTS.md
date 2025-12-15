@@ -11,14 +11,20 @@ If a conflict exists, **this file overrides Global AGENTS.md** for this reposito
 
 - **Project type**: Local-first developer control plane
 - **Primary components**:
-  - Local daemon (authority, orchestration, approvals)
+  - Local daemon (authority, orchestration, approvals) - **SERVES HTTPS + ONBOARDING**
   - `navisai` CLI (control + automation)
-  - SvelteKit PWA (mobile-first UI, LAN accessible)
+  - SvelteKit PWA (mobile-first UI, served by daemon)
 - **Distribution model**:
   - OSS monorepo (this repo)
   - NPM-distributed consumer tooling
   - Premium features implemented out-of-repo
 - **Core principle**: Human-in-the-loop by default
+
+### Critical Architecture Requirements
+- Daemon **MUST** serve HTTPS at `https://navis.local` 
+- Daemon **MUST** include onboarding flow at `/welcome`
+- Daemon **MUST** serve the PWA (not separate dev server)
+- PWA connects to daemon via HTTPS, NOT separate ports
 
 ---
 
@@ -34,9 +40,12 @@ packages/
   db/            # Drizzle ORM + SQLite (native driver optional)
   logging/       # Shared logging utilities
   create-navis/  # Project generator
+  discovery/     # Project discovery and classification engine
+  api-contracts/ # REST/WS schema definitions
+  core/          # Domain types, state machines, validation
 
 docs/
-  *.md           # Pairing, IPC, auth, security, plugin specs
+  *.md           # Architecture, pairing, IPC, auth, security specs
 ```
 
 Folder boundaries are intentional and must be respected.  
@@ -115,7 +124,10 @@ pnpm --filter <pkg> <command>
 
 ### PWA dev (if applicable)
 ```bash
-pnpm --filter @navisai/pwa dev
+# IMPORTANT: PWA is served by daemon, not separate dev server
+# The PWA is built into the daemon for production HTTPS serving
+pnpm --filter @navisai/pwa build  # Build PWA assets
+pnpm --filter @navisai/daemon dev   # Daemon serves PWA at https://navis.local
 ```
 
 ### Formatting
@@ -212,15 +224,23 @@ Logs are part of the UX for a local control plane.
 - [ ] No premium logic added
 - [ ] Daemon authority preserved
 - [ ] Logs added where behavior is non-obvious
+- [ ] Daemon serves HTTPS (not HTTP)
+- [ ] Daemon includes onboarding at `/welcome`
+- [ ] PWA served by daemon at `https://navis.local`
+- [ ] All API endpoints use HTTPS
+- [ ] Discovery and classification implemented
 
 ---
 
 ## 11. Security Posture (Local)
 
 - Default to local-only
+- **ALL network activity MUST use HTTPS** (per SECURITY.md)
 - LAN exposure must be explicit and gated
 - Daemon is a privileged process
 - Never assume trust without pairing + approval
+- No cloud dependencies in OSS version
+- All data stored locally in SQLite at `~/.navis/db.sqlite`
 
 ---
 
