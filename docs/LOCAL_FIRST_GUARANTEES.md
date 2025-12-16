@@ -202,6 +202,23 @@ NavisAI guarantees:
 
 These guarantees are **intentional, testable, and user-visible**.
 
+## 11. Alignment & Next Steps
+
+### 11.1 Guarantee map
+
+- **Single local authority** is enforced by the unprivileged daemon on loopback while the CLI/PWA remain clients (`docs/NETWORKING.md`, `docs/SETUP.md`).
+- **Offline-first operation** is enabled once `navisai setup` installs the OS-managed bridge + mDNS assets (`docs/SETUP.md`, `docs/ONBOARDING_FLOW.md`), letting users run without WAN dependencies.
+- **Explicit trust and pairing** are spelled out in `docs/PAIRING_PROTOCOL.md`, `docs/AUTH_MODEL.md`, and the browser experiences outlined in `docs/ONBOARDING_FLOW.md`.
+- **Crash-safe recovery & degraded mode** depend on the diagnostics described in `docs/SECURITY.md`, making sure `navisai doctor` / the daemon `/status` endpoint surface bridge, mDNS, and DB health.
+- **No hidden cloud dependencies** reinforces the LAN-only origin contract from `docs/NETWORKING.md`.
+
+### 11.2 Next steps forward
+
+1. **Keep the docs synchronized with implementation**: any revisions to the bridge, mDNS, or onboarding UX (CLI, daemon, PWA, setup helper) should be reflected in `docs/NETWORKING.md`, `docs/SETUP.md`, and `docs/ONBOARDING_FLOW.md` before landing.
+2. **Exercise the clean URL**: verify `navisai up`/`navisai setup` still deliver `https://navis.local` without asking for daily `sudo`, and that onboarding loads via the OS-managed bridge + mDNS.
+3. **Re-evaluate pairing/auth flows after client changes**: ensure updates to `docs/AUTH_MODEL.md` or `docs/PAIRING_PROTOCOL.md` also inform this guarantee document so the human-in-the-loop story stays intact.
+4. **Document new diagnostics**: when health checks expand (cert rotation, pairing timeouts, etc.), keep `navisai doctor`/UI messaging and this doc aligned so users immediately understand recovery paths.
+
 ---
 
 *This document must be updated if any guarantee changes or is intentionally relaxed.*

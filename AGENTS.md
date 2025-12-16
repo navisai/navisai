@@ -10,7 +10,9 @@ If a conflict exists, **this file overrides Global AGENTS.md** for this reposito
 ## 0. Docs Are Canonical (No Veering)
 
 - The `docs/` folder is the source of truth for architecture, onboarding, setup, pairing, networking, IPC, auth, local-first guarantees, and security. Before implementing or changing behavior, identify the relevant doc(s) and keep code aligned to them.
-- Doc sweeps (multi-file documentation alignment passes) require explicit user verification/approval **before** making broad edits; when in doubt, limit changes to the minimum necessary doc(s) and ask first.
+- The canonical doc for navis.local / LAN access is `docs/NETWORKING.md`. Other domain-specific canonicals include `docs/ONBOARDING_FLOW.md`, `docs/SETUP.md`, `docs/MACOS_SETUP_EXPERIENCE.md`, and `docs/LOCAL_FIRST_GUARANTEES.md`. Reference the applicable doc(s) before making cross-cutting changes.
+- Doc sweeps (multi-file documentation alignment passes or anytime more than one subsystem doc is touched) require explicit user verification/approval **before** editing. List the targeted doc(s), describe the scope, and wait for the user to confirm the proposed sweep before starting work.
+- Always cite the doc(s) you are following in your implementation plan, commit message, and final report; if behavior changes, spell out which doc dictated the change.
 - If documentation conflicts:
   - Treat `docs/NETWORKING.md` as the doc-of-record for canonical origin and LAN access.
   - Update the conflicting doc(s) to match `docs/NETWORKING.md` (do not “split the difference”).
