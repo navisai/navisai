@@ -129,6 +129,12 @@ Open onboarding:
 - TLS status (daemon cert present; validity window)
 - Daemon status (`GET /status`)
 
+Quick manual smoke test (macOS + iPhone on same Wi‑Fi):
+
+1. Run `navisai setup` once (accept the macOS admin sheet).
+2. Run `navisai up` (no sudo).
+3. On the iPhone, open `https://navis.local/welcome` and follow the certificate trust steps if prompted.
+
 ---
 
 ## 6. Uninstall / reset (must be supported)

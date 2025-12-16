@@ -9,6 +9,7 @@
   "dependencies": {
     "@navisai/daemon": "workspace:*",
     "@navisai/api-contracts": "workspace:*",
+    "@navisai/setup-app": "workspace:*",
     "commander": "^12.1.0"
   }
 }

@@ -7,7 +7,7 @@ import { homedir, networkInterfaces, platform } from 'node:os'
 import { createRequire } from 'node:module'
 import readline from 'node:readline/promises'
 import { NAVIS_PATHS } from '@navisai/api-contracts'
-import { installBridge, uninstallBridge } from '../../setup-app/bridge.js'
+import { installBridge, uninstallBridge } from '@navisai/setup-app/bridge'
 
 const execAsync = promisify(exec)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -224,7 +224,13 @@ async function uninstallMacOSBridge() {
 }
 
 async function launchMacOSSetupApp() {
-  const setupAppPath = path.join(__dirname, '..', '..', 'setup-app', 'index.js')
+  const setupAppPath = (() => {
+    try {
+      return require.resolve('@navisai/setup-app')
+    } catch {
+      return path.join(__dirname, '..', '..', 'setup-app', 'index.js')
+    }
+  })()
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [setupAppPath], {
       stdio: 'inherit'

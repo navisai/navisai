@@ -1,11 +1,13 @@
 import { exec as execCb } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 
 const execAsync = promisify(execCb)
+const require = createRequire(import.meta.url)
 
 export async function hasCommand(cmd) {
   try {
@@ -26,7 +28,24 @@ function escapeAppleScriptShell(command) {
 }
 
 export async function installMacOSBridge() {
-  const bridgeEntrypoint = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'daemon', 'src', 'bridge.js')
+  const bridgeEntrypoint =
+    (typeof require.resolve === 'function' &&
+      (() => {
+        try {
+          return require.resolve('@navisai/daemon/bridge')
+        } catch {
+          return null
+        }
+      })()) ||
+    (typeof require.resolve === 'function' &&
+      (() => {
+        try {
+          return require.resolve('@navisai/daemon/src/bridge.js')
+        } catch {
+          return null
+        }
+      })()) ||
+    path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'daemon', 'src', 'bridge.js')
   const nodePath = process.execPath
 
   const localDir = path.join(homedir(), '.navis', 'bridge')
