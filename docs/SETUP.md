@@ -1,5 +1,5 @@
 # Navis AI — Setup (Apple-like LAN Experience)
-Version: v0.1  
+Version: v0.2  
 Status: Draft (Implementable target)
 
 Canonical networking model: see `NETWORKING.md`.
@@ -7,20 +7,22 @@ Preferred macOS UX: see `MACOS_SETUP_EXPERIENCE.md`.
 
 ---
 
-## 1. What “setup” enables
+## 1. What "setup" enables
 
 Navis targets a single, clean LAN origin:
 
 - `https://navis.local` (no port)
-- Onboarding: `https://navis.local/welcome`
-- WebSocket: `wss://navis.local/ws`
+- Navis UI: `https://navis.local/navis/welcome`
+- Your app: `https://navis.local` (when port 443 is occupied)
+- WebSocket: `wss://navis.local/navis/ws`
 
 To make this work without requiring users to run `sudo` for daily usage, Navis requires a one-time setup step that:
 
-1. Enables a local **Navis Bridge** that owns TCP 443 and forwards to the daemon port (default 47621).
-2. Enables **mDNS/Bonjour** so `navis.local` resolves on the LAN to the host machine’s LAN IP.
+1. **Installs an intelligent Navis Bridge** that can handle port 443 conflicts gracefully.
+2. Enables **mDNS/Bonjour** so `navis.local` resolves on the LAN to the host machine's LAN IP.
 3. Generates/refreshes local TLS material for `navis.local`.
-4. Guides device trust for mobile clients (iOS requires explicit trust for local certificates).
+4. **Detects and routes around existing port 443 services** automatically.
+5. Guides device trust for mobile clients (iOS requires explicit trust for local certificates).
 
 This step is explicit, user-consented, and reversible.
 
@@ -53,66 +55,52 @@ Run setup:
 navisai setup
 ```
 
-`navisai setup` launches the cross-platform helper from `apps/setup-app` (`@navisai/setup-app`) so the privileged bridge install (macOS LaunchDaemon / Linux systemd / Windows service) happens with a user-facing dialog before normal `navisai up` runs without `sudo`.
-
-Setup may require administrator privileges (OS prompt) to register the bridge service and bind 443. Normal usage must not require `sudo`.
+`navisai setup` launches the cross-platform helper from `apps/setup-app` (`@navisai/setup-app`) so the privileged bridge install happens with a user-facing dialog that explains routing and port detection.
 
 ---
 
 ## 3. What `navisai setup` must do (spec)
 
-### 3.1 Bridge service (443 → 47621)
+### 3.1 Intelligent Bridge service (reverse proxy on port 443)
 
 Requirements:
 
-- Listens on `0.0.0.0:443` for inbound LAN traffic to `navis.local`.
-- Forwards TCP to `127.0.0.1:47621` (daemon), preserving end-to-end TLS to the daemon.
-- Managed by the OS service manager so it is “always there” when the daemon is running.
-- Fully reversible (uninstall/disable).
+- **Detects existing port 443 services** before binding
+- **Routes `/navis/*` paths** to Navis daemon on `127.0.0.1:47621`
+- **Routes all other paths** to the user's development app on port 443
+- **Terminates TLS** for path inspection, re-encrypts when forwarding
+- **Monitors for service changes** and reconfigures routing automatically
+- Managed by the OS service manager so it's "always there"
+- Fully reversible (uninstall/disable)
 
-Recommended OS integrations:
+Routing behavior:
 
-- macOS: launchd socket activation
-- Linux: systemd socket activation
-- Windows: service
-
-Current implementation status:
-
-- macOS: implemented via a `launchd` LaunchDaemon (`com.navisai.bridge`) that runs `navisai-bridge` and binds 443 (admin prompt required once).
-- Linux: implemented via a `systemd` service (`navisai-bridge.service`) installed by `navisai setup` (admin privileges via `pkexec` if available, otherwise `sudo`).
-- Windows: implemented via a Windows service (`navisai-bridge`) created by `navisai setup` (UAC prompt + `sc` service for automatic 443 → 47621 forwarding).
+1. **Port 443 free**: Bridge binds directly, all traffic to Navis
+2. **Port 443 occupied**: 
+   - Attempts to inject itself as a proxy
+   - Routes `/navis/*` → daemon
+   - Routes `/*` → existing service
+3. **Injection fails**: Clear error message with alternatives
 
 ### 3.2 mDNS/Bonjour for `navis.local`
 
 Requirements:
 
-- Provide `navis.local` resolution on the LAN to the host’s current LAN IP (A/AAAA).
-- Publish a discovery service record for diagnostics and future features:
-  - service name: `_navisai._tcp.local`
-  - include TXT `tls=1`, `version=1`, and canonical origin `origin=https://navis.local`
-
-Notes:
-
-- Do not use hosts-file strategies for LAN/phone access.
-- Conflicts must be detected (if another host claims `navis.local`, setup must fail with actionable guidance).
-- Implementation note (v0.1): mDNS advertisement is provided by the daemon at runtime; `navisai setup` is responsible for enabling the bridge and can add diagnostics later to confirm mDNS behavior.
+- Provide `navis.local` resolution on the LAN to the host's current LAN IP (A/AAAA).
+- Publish a discovery service record:
+  - Service name: `_navisai._tcp.local`
+  - TXT records: `tls=1`, `version=1`, `origin=https://navis.local`
 
 ### 3.3 Certificates and trust
 
 Requirements:
 
-- The daemon serves HTTPS with a certificate valid for `navis.local`.
+- The bridge serves HTTPS with a certificate valid for `navis.local`.
 - Setup generates and stores cert material under `~/.navis/certs/`:
   - `~/.navis/certs/navis.local.crt`
   - `~/.navis/certs/navis.local.key`
-- On iOS, users must perform an explicit one-time trust action. Setup/onboarding must guide this.
-- Implementation note (v0.1): certificate generation happens automatically on first daemon startup; `navisai setup` may later pre-generate and export trust material for mobile.
-
-Minimum acceptable onboarding UX:
-
-1. User opens `https://navis.local/welcome` on desktop and sees onboarding.
-2. Phone connects to the same origin and is guided through trusting the certificate (or installing a local CA/profile).
-3. After trust is established, pairing proceeds via QR token as described in `PAIRING_PROTOCOL.md`.
+- For forwarding to user's app: either pass through original TLS or re-encrypt
+- iOS trust guidance provided in onboarding
 
 ---
 
@@ -124,9 +112,11 @@ Start Navis:
 navisai up
 ```
 
-Open onboarding:
+Access URLs:
+- Navis UI: `https://navis.local/navis/welcome`
+- Your app: `https://navis.local` (if port 443 was occupied during setup)
 
-- `https://navis.local/welcome`
+The bridge handles routing transparently.
 
 ---
 
@@ -134,56 +124,79 @@ Open onboarding:
 
 `navisai doctor` must report:
 
-- Bridge status (installed/enabled, 443 reachable)
-- mDNS status (`navis.local` resolves to the host LAN IP)
-- TLS status (daemon cert present; validity window)
-- Daemon status (`GET /status`)
+- Bridge status (installed/enabled, routing mode)
+- Port 443 detection (free/occupied, service name)
+- mDNS status (`navis.local` resolution)
+- TLS status (certificate validity)
+- Daemon status (`GET /navis/status`)
+- Routing table (what paths go where)
 
-Quick manual smoke test (macOS + iPhone on same Wi‑Fi):
-
-1. Run `navisai setup` once (accept the macOS admin sheet).
-2. Run `navisai up` (no sudo).
-3. On the iPhone, open `https://navis.local/welcome` and follow the certificate trust steps if prompted.
+Example output:
+```
+✅ Bridge: Enabled (intelligent routing mode)
+✅ Port 443: Occupied by nginx
+✅ Routing: /navis/* → Navis, /* → nginx
+✅ mDNS: navis.local → 192.168.1.100
+✅ TLS: Valid until 2025-12-31
+✅ Daemon: Running
+```
 
 ---
 
 ## 6. Uninstall / reset (must be supported)
 
-`navisai reset` (or equivalent) must be able to:
+`navisai reset` must:
+- Disable/remove the bridge service
+- **Preserve user's port 443 service** - uninstall should not break their app
+- Stop mDNS advertising
+- Remove local certificates (optional, with confirmation)
 
-- disable/remove the bridge service
-- stop advertising mDNS records
-- remove local certificates (optional, with explicit confirmation)
+The bridge uninstall must:
+1. Stop the bridge process
+2. **Ensure the original port 443 service continues uninterrupted**
+3. Remove LaunchDaemon/service files
 
-Reset must never silently delete user data without approval.
-
-### UX Plan (non-terminal, macOS)
-
-For mainstream users, the preferred path is the macOS Setup app described in `MACOS_SETUP_EXPERIENCE.md`:
-
-- **Enable** installs the bridge LaunchDaemon (one-time admin sheet), then opens `https://navis.local/welcome`.
-- **Disable** removes the bridge LaunchDaemon (one-time admin sheet). This does not delete user data.
-- “Reset data…” is separate and requires explicit confirmation if it removes `~/.navis/db.sqlite` or certificates.
+---
 
 ## 7. Cleanup (factory reset for testing)
 
-For repeatable onboarding tests, Navis supports a **confirm-gated** cleanup command that can remove both system setup artifacts and local state.
+For repeatable onboarding tests, Navis supports a **confirm-gated** cleanup command.
 
 ### 7.1 `navisai cleanup` modes
 
-- `navisai cleanup --bridge-only` (safe/default behavior):
-  - Equivalent to `navisai reset`.
-  - Removes the OS bridge service and optionally TLS certs.
-  - Does **not** delete the database or user state.
+- `navisai cleanup --bridge-only` (safe/default):
+  - Removes bridge service only
+  - Does NOT affect the user's port 443 applications
+  - Optionally removes TLS certs
+  - Preserves all Navis data
 
 - `navisai cleanup --all` (destructive):
-  - Removes the OS bridge service.
-  - Optionally removes TLS certs (`~/.navis/certs/`).
-  - Removes local state under `~/.navis/` including `~/.navis/db.sqlite` (paired devices, approvals, preferences).
+  - Removes bridge service
+  - Removes all Navis local state
+  - **Leaves user's applications running on port 443 untouched**
 
 ### 7.2 Safety requirements
 
-- Must present a clear summary of what will be deleted before executing.
-- Must require explicit user confirmation for destructive deletes (typed confirmation, not a yes/no).
-- Must stop the daemon before deleting local state (or refuse until stopped).
-- Must never run automatically on install or on `navisai up`.
+- Must confirm the bridge can be removed without disrupting user services
+- Must verify port 443 remains accessible after bridge removal
+- Clear warnings about what will/won't be affected
+- Typed confirmation for destructive operations
+
+---
+
+## 8. Port Conflict Resolution Flow
+
+When `navisai setup` detects port 443 usage:
+
+1. **Identify the service** (process name, PID)
+2. **Explain the situation**: "Port 443 is used by [nginx]. Navis will route to your app at https://navis.local and to Navis at https://navis.local/navis/*"
+3. **Show routing plan**:
+   - Your app: https://navis.local
+   - Navis UI: https://navis.local/navis/welcome
+4. **Attempt installation**
+5. **If routing fails**:
+   - Clear explanation of why
+   - Offer alternatives:
+     - Temporarily stop the other service
+     - Use a different port for testing
+     - Manual proxy configuration

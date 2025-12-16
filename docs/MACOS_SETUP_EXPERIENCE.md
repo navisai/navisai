@@ -1,6 +1,6 @@
 # Navis AI — macOS Setup Experience (Apple-like)
 
-Version: v0.1  
+Version: v0.2  
 Status: Spec (preferred UX)
 
 Canonical networking model: `NETWORKING.md`.
@@ -15,12 +15,13 @@ It intentionally avoids terminal-first workflows for mainstream users.
 
 ## 1. UX Goal
 
-Deliver a “double-click installer” experience:
+Deliver a "double-click installer" experience:
 
 1. User installs Navis like a normal Mac app.
 2. macOS shows a standard authentication sheet **once** (administrator approval).
 3. After install, daily usage requires **no password** and **no sudo**.
-4. User can uninstall cleanly.
+4. **Navis integrates seamlessly with existing development servers** on port 443.
+5. User can uninstall cleanly.
 
 ---
 
@@ -29,149 +30,159 @@ Deliver a “double-click installer” experience:
 Browsers interpret `https://navis.local` as TCP **443**.
 On macOS, something must be authorized to bind 443 (directly or via launchd/system services).
 
-The goal is not “no admin approval ever”, but:
+The goal is not "no admin approval ever", but:
 
 > Admin approval once during install/setup, never during daily use.
 
+> **Seamless integration**: Navis should never disrupt the developer's existing workflow.
+
 ---
 
-## 3. Preferred macOS Delivery: Installer + Privileged Bridge
+## 3. Preferred macOS Delivery: Installer + Intelligent Bridge
 
 ### 3.1 What gets installed (system-level)
 
-Install a small “Navis Bridge” component that:
+Install a small "Navis Bridge" component that:
 
-- Binds `0.0.0.0:443` (LAN)
-- Forwards TCP to the daemon on `127.0.0.1:47621`
-- Does **not** terminate TLS (TCP passthrough; daemon remains the TLS endpoint)
+- Binds `0.0.0.0:443` (LAN) as an **intelligent reverse proxy**
+- **Detects existing port 443 services** and routes accordingly
+- Routes `/navis/*` paths to Navis daemon on `127.0.0.1:47621`
+- Routes all other paths to the user's development app on port 443
+- Terminates TLS for routing, re-encrypts when forwarding to daemon
 
 Managed by:
-
 - `launchd` LaunchDaemon (system domain)
 
 ### 3.2 What the user sees
 
 - A standard macOS installer UI (signed `.pkg`) or a small macOS Setup app.
 - A single macOS authentication sheet for admin approval.
+- **Smart detection**: Setup app detects if port 443 is already in use.
 - A final success screen that opens:
-  - `https://navis.local/welcome`
+  - `https://navis.local/navis/welcome` (Navis UI)
+  - Instructions that their app is available at `https://navis.local`
 
-### 3.3 Setup app responsibilities (nice-to-have)
+### 3.3 Setup app responsibilities
 
-A “Navis Setup” app can make the experience Apple-like:
+A "Navis Setup" app provides the Apple-like experience:
 
-- Shows clear status: Bridge, mDNS, TLS, daemon
+- Shows clear status: Bridge, mDNS, TLS, daemon, Port 443 detection
+- **Port 443 intelligence**:
+  - Shows "Port 443 is in use by [app name]"
+  - Explains automatic routing setup
+  - Warns if routing injection might fail
 - Runs diagnostics equivalent to `navisai doctor`
-- Offers “Enable” / “Disable” buttons (calls privileged install/uninstall)
+- Offers "Enable" / "Disable" buttons
 - Provides QR + pairing onboarding deep link
 
 ## 3.4 UX Plan (Install + Uninstall)
 
-This section is a concrete plan for implementing a clean, Apple-like setup experience while preserving the canonical architecture in `docs/NETWORKING.md` and the setup spec in `docs/SETUP.md`.
+### Install (clean and intelligent)
 
-### Install (clean and easy)
+Goal: one standard macOS admin sheet, seamless integration with existing apps.
 
-Goal: one standard macOS admin sheet, then onboarding opens automatically.
-
-1. User launches “Navis Setup”.
+1. User launches "Navis Setup".
 2. Setup app runs preflight checks (no privilege required):
-   - Detect whether the bridge LaunchDaemon is already installed/enabled.
-   - Detect whether `navis.local` is resolving (best-effort; mDNS requires the daemon at runtime in v0.1).
-   - Detect whether TLS material exists at `~/.navis/certs/` (informational; daemon is the TLS endpoint).
+   - Detect whether bridge LaunchDaemon is installed/enabled
+   - **Scan for port 443 usage** and identify the service
+   - Detect whether `navis.local` resolves via mDNS
+   - Check TLS material at `~/.navis/certs/`
 3. User clicks **Enable**.
-4. Setup app requests admin approval once and installs/bootstraps the bridge (LaunchDaemon) that binds TCP 443 and forwards to the daemon port (TCP passthrough).
-5. Setup app shows a success screen and opens:
-   - `https://navis.local/welcome`
+4. If port 443 is free:
+   - Standard bridge installation
+5. If port 443 is occupied:
+   - Explain the automatic routing setup
+   - Show how Navis will integrate with existing app
+6. Setup app requests admin approval and installs the intelligent bridge.
+7. Bridge automatically configures routing based on detected services.
+8. Setup app shows success and opens:
+   - `https://navis.local/navis/welcome`
+   - Note about accessing their app at `https://navis.local`
 
-### Uninstall / Disable (clean and easy)
+### Uninstall / Disable (clean and safe)
 
-Goal: an obvious “Disable” button that cleanly removes the privileged component without deleting user data.
+Goal: clean removal without disrupting user's development setup.
 
-1. User launches “Navis Setup”.
-2. If the bridge is enabled, UI shows **Disable** (and a “Re-enable” affordance after disable).
+1. User launches "Navis Setup".
+2. If bridge is enabled, UI shows **Disable**.
 3. User clicks **Disable**.
-4. Setup app requests admin approval and:
-   - `launchctl bootout` the LaunchDaemon if loaded
-   - Removes `/Library/LaunchDaemons/com.navisai.bridge.plist`
-5. Setup app confirms that `https://navis.local` will no longer be reachable without the bridge and offers:
-   - “Open reset instructions” (optional)
-   - “Keep data” (default)
-
-Data deletion is explicitly out of scope for “Disable”.
-If the user wants to remove local data (e.g. `~/.navis/db.sqlite`, certs), the app must present a separate, explicit “Reset data…” flow with clear warnings and confirmation.
+4. Setup app:
+   - Warns if port 443 routing will affect Navis access
+   - Preserves user's development app functionality
+   - Removes only Navis routing rules
+5. Confirms that their development app remains unaffected.
 
 ---
 
-## 4. Relationship to NPM CLI
+## 4. Intelligent Routing Behavior
 
-The NPM CLI remains the developer/control surface:
+### 4.1 When port 443 is free
+- Navis owns port 443 directly
+- `https://navis.local` → Navis (redirects to `/navis/welcome`)
 
-- `navisai up` starts the daemon (unprivileged).
-- `navisai doctor` validates readiness.
+### 4.2 When port 443 is occupied
+- Bridge injects itself as a proxy
+- `https://navis.local/navis/*` → Navis daemon
+- `https://navis.local/*` → User's development app
+- **Transparent to the user's app** - no configuration needed
 
-For mainstream macOS users, the GUI installer/setup app is the **default**.
-The terminal command `navisai setup` is an **advanced alternative** for power users. It launches the `apps/setup-app` helper (a lightweight Node + AppleScript dialog) so the experience still feels like an installer before performing the bridge install.
-
----
-
-## 5. Uninstall / Disable (must be supported)
-
-The user must be able to remove the bridge cleanly:
-
-- Disable/uninstall LaunchDaemon
-- Remove installed binaries/config for the bridge
-
-This must never delete `~/.navis/db.sqlite` without explicit confirmation.
-
----
-
-## 6. Implementation Notes (for engineers)
-
-Acceptable macOS implementation strategies:
-
-- Signed `.pkg` that installs a LaunchDaemon + `navisai-bridge` binary
-- `SMJobBless` privileged helper (more complex, most “Apple-like”)
-
-Non-goals:
-
-- Requiring nginx
-- Requiring users to manually edit `/etc/hosts`
-- Binding the daemon directly to 443
+### 4.3 Conflict resolution
+- If routing injection fails:
+  - Clear error message explaining the issue
+  - Provides alternatives:
+    - Stop the conflicting service temporarily
+    - Use Navis on alternate port (for testing only)
+    - Manual proxy configuration instructions
 
 ---
 
-## 7. Implementation Checklist (Setup app v0.1)
+## 5. Relationship to NPM CLI
 
-This checklist is intentionally scoped to the OSS repo and the documented architecture.
+The NPM CLI remains the developer control surface:
+
+- `navisai up` starts the daemon (unprivileged)
+- `navisai doctor` validates routing and connectivity
+- `navisai setup` launches the GUI Setup app (default on macOS)
+
+---
+
+## 6. Implementation Notes
+
+### 6.1 Bridge Implementation Strategies
+- **HTTP proxy module** (Node.js http-proxy or similar)
+- **TLS termination** with certificate for `navis.local`
+- **Path-based routing** with configurable rules
+- **Service detection** via port scanning and process inspection
+
+### 6.2 Safety Mechanisms
+- **Never disrupt existing services** - bridge must fail safe
+- **Automatic fallback** if proxy rules cause issues
+- **Clear error reporting** with actionable guidance
+- **Preserve original service behavior** - Navis should be invisible to the user's app
+
+### 6.3 Non-goals
+- Manual proxy configuration
+- Editing `/etc/hosts`
+- Requiring users to change their app's port
+- Breaking existing development workflows
+
+---
+
+## 7. Implementation Checklist (Setup app v0.2)
 
 ### 7.1 Setup app behaviors
+- **Port 443 detection** and service identification
+- **Routing status display**: Shows what paths go where
+- **Conflict warnings**: Clear messaging about potential issues
+- **Preflight diagnostics**: Bridge, daemon, TLS, mDNS, port usage
 
-- Add an explicit mode selection:
-  - **Enable** (install/enable bridge)
-  - **Disable** (uninstall/disable bridge)
-  - Optional: **Open onboarding** (non-privileged convenience)
-- Add preflight status display (no privilege):
-  - Bridge installed? (`launchctl print system/com.navisai.bridge`)
-  - Daemon reachable? (`GET https://navis.local/status` best-effort)
-  - Cert present? (`~/.navis/certs/navis.local.crt` best-effort)
-- Ensure messaging is “Apple-like”: concise, calm, and clear about the one-time admin sheet.
-
-### 7.2 Privileged operations (macOS)
-
-- Enable:
-  - Write plist to `/Library/LaunchDaemons/com.navisai.bridge.plist`
-  - `launchctl bootstrap system ...`
-  - `launchctl enable system/com.navisai.bridge`
-  - `launchctl kickstart -k system/com.navisai.bridge`
-- Disable:
-  - `launchctl bootout system /Library/LaunchDaemons/com.navisai.bridge.plist || true`
-  - Remove plist file
+### 7.2 Bridge requirements
+- **Path-based routing**: `/navis/*` → daemon
+- **Default routing**: `/*` → port 443 app
+- **TLS handling**: Terminate and re-encrypt as needed
+- **Service monitoring**: Detect and adapt to changes
 
 ### 7.3 CLI integration
-
-- `navisai setup`:
-  - Default to launching the setup app on macOS (already intended).
-  - Support a `--no-ui` mode for advanced users.
-- `navisai reset`:
-  - Remains the power-user/CI fallback.
-  - Must never delete `~/.navis/db.sqlite` without explicit confirmation.
+- `navisai doctor` shows routing status
+- `navisai setup` defaults to GUI on macOS
+- Enhanced error messages for routing issues
