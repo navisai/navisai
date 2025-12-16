@@ -31,6 +31,16 @@ This step is explicit, user-consented, and reversible.
 Most users should use the macOS installer / setup app described in `MACOS_SETUP_EXPERIENCE.md`.
 The CLI setup command exists for power users and CI-like environments.
 
+### Pre-publish local testing (this repo)
+
+If you are testing before publishing to NPM, run commands from the repo root:
+
+- `./navisai up`
+- `./navisai setup`
+- `./navisai doctor`
+
+To make `navisai` available without `./`, run `pnpm dev:link` once to install a symlink into `~/.local/bin` (opt-in and reversible with `pnpm dev:unlink`). Ensure `~/.local/bin` is on your `PATH`.
+
 Install the CLI:
 
 ```bash

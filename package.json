@@ -12,6 +12,8 @@
     "dev:standalone-pwa": "pnpm --filter @navisai/pwa dev:standalone",
     "verify:arch": "node scripts/verify-architecture.mjs",
     "verify:npm-layout": "node scripts/verify-npm-layout.mjs",
+    "dev:link": "node scripts/link-local-navisai.mjs link",
+    "dev:unlink": "node scripts/link-local-navisai.mjs unlink",
     "verify": "pnpm verify:arch && pnpm verify:npm-layout && pnpm format:check && pnpm --filter @navisai/pwa check",
     "hooks:install": "node scripts/install-git-hooks.mjs install",
     "hooks:uninstall": "node scripts/install-git-hooks.mjs uninstall",
