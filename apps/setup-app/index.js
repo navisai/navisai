@@ -2,7 +2,7 @@
 
 import { exec as execCb } from 'node:child_process'
 import { promisify } from 'node:util'
-import { installBridge } from './bridge.js'
+import { installBridge, uninstallBridge } from './bridge.js'
 
 const execAsync = promisify(execCb)
 
@@ -34,25 +34,76 @@ async function openOnboarding() {
   await execAsync('open https://navis.local/welcome')
 }
 
+async function isBridgeInstalled() {
+  try {
+    await execAsync('launchctl print system/com.navisai.bridge >/dev/null 2>&1')
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function isNavisReachable() {
+  try {
+    const response = await fetch('https://navis.local/status')
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
 async function main() {
+  const bridgeInstalled = await isBridgeInstalled()
+  const reachable = await isNavisReachable()
+
+  const statusLines = [
+    `Bridge: ${bridgeInstalled ? 'Enabled' : 'Not enabled'}`,
+    `Navis: ${reachable ? 'Reachable' : 'Not reachable (start with navisai up)'}`,
+  ]
+
   const message = [
-    'Navis needs to install a small system helper to own port 443 and forward traffic to the local daemon.',
+    'Navis uses a small system helper (Navis Bridge) to own port 443 so https://navis.local works on your LAN.',
     '',
-    'This is a one-time action. After the bridge is active, you can start Navis via `navisai up` and visit https://navis.local/welcome without needing a password.'
+    ...statusLines,
+    '',
+    bridgeInstalled
+      ? 'Choose Disable to remove the bridge. This does NOT delete your local data.'
+      : 'Choose Enable to install the bridge. This is a one-time action and will prompt for your password via the standard macOS security sheet.',
   ].join('\\n')
 
-  const choice = await displayDialog(message)
-  if (choice !== 'Install') {
-    await showAlert('Setup canceled', 'No changes were made.')
-    process.exit(0)
-  }
+  const buttons = bridgeInstalled ? ['Cancel', 'Disable', 'Open onboarding'] : ['Cancel', 'Enable']
+  const defaultButton = bridgeInstalled ? 'Open onboarding' : 'Enable'
+
+  const choice = await displayDialog(message, buttons, defaultButton)
 
   try {
-    await installBridge('darwin')
-    await showAlert('Success', 'Navis is now accessible at https://navis.local. Open it to continue onboarding.')
-    await openOnboarding()
+    if (choice === 'Enable') {
+      await installBridge('darwin')
+      await showAlert(
+        'Enabled',
+        'Navis Bridge is enabled. Start Navis with `navisai up`, then open https://navis.local/welcome.'
+      )
+      await openOnboarding()
+      return
+    }
+
+    if (choice === 'Disable') {
+      await uninstallBridge('darwin')
+      await showAlert(
+        'Disabled',
+        'Navis Bridge is disabled. https://navis.local will no longer be reachable without re-enabling. Your data was not removed.'
+      )
+      return
+    }
+
+    if (choice === 'Open onboarding') {
+      await openOnboarding()
+      return
+    }
+
+    await showAlert('Setup canceled', 'No changes were made.')
   } catch (error) {
-    await showAlert('Installation failed', error.message || 'See navisai doctor for details.')
+    await showAlert('Setup failed', error.message || 'See navisai doctor for details.')
     process.exit(1)
   }
 }
