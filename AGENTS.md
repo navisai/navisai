@@ -304,12 +304,50 @@ Logs are part of the UX for a local control plane.
 
 ## 13. Beads Task Management Protocol
 
+### Quick Start (3 Commands)
+```bash
+cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
+bd prime    # Load project context
+bd ready    # Find work to do
+bd create "Brief task description" -t task -d "Details"  # Create new issue
+```
+
 ### 13.1 Canonical Task Tracking System
 
 - **Beads is the canonical task tracking system** for NavisAI development
 - All multi-agent work must use Beads for coordination and memory persistence
 - Beads issues provide dependency-aware task management across sessions
 - Integration is enforced via architecture verification scripts
+
+### 13.1.1 Agent Onboarding with Beads
+
+**First-Time Setup (One-Time)**:
+```bash
+# 1. Install Beads globally
+npm install -g beads
+
+# 2. Initialize Beads in this repository (already done)
+# If needed: bd init
+
+# 3. Setup Claude Code integration (recommended)
+pnpm beads:setup
+
+# 4. Load project context
+bd prime
+```
+
+**Daily Onboarding (Every Session)**:
+```bash
+cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
+bd prime  # Load current issues and context
+bd ready  # See available work
+```
+
+**Troubleshooting**:
+- Beads command not found: `npm install -g beads`
+- Issues not showing: Check you're in navisai directory, run `bd list`
+- For complete guidance: See `docs/BEADS_AGENT_GUIDE.md`
+- Help: `bd --help` or `bd <command> --help`
 
 ### 13.2 Required Workflow Integration
 
