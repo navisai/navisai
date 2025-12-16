@@ -31,6 +31,7 @@ If a conflict exists, **this file overrides Global AGENTS.md** for this reposito
 - REST/WS endpoints: `docs/IPC_TRANSPORT.md`, `packages/api-contracts`
 - Auth / device trust: `docs/AUTH_MODEL.md`, `docs/PAIRING_PROTOCOL.md`, `packages/db`
 - Local-first guarantees: `docs/LOCAL_FIRST_GUARANTEES.md`, `docs/SECURITY.md`
+- Beads workflow / multi-agent coordination: `docs/BEADS_WORKFLOW.md`, `docs/BEADS_AGENT_GUIDE.md`
 
 ### Change Log Discipline (For Every Patch)
 - State which doc(s) you are implementing.
@@ -298,6 +299,136 @@ Logs are part of the UX for a local control plane.
 - Treat this file as binding
 - **No attribution**: Do not add AI-generated attribution to commits, messages, or code
 - Before acting, double-check this file (via `CLAUDE.md` if you need a shortcut) and the relevant `docs/` pages so you never drift from documented architecture.
+
+---
+
+## 13. Beads Task Management Protocol
+
+### 13.1 Canonical Task Tracking System
+
+- **Beads is the canonical task tracking system** for NavisAI development
+- All multi-agent work must use Beads for coordination and memory persistence
+- Beads issues provide dependency-aware task management across sessions
+- Integration is enforced via architecture verification scripts
+
+### 13.2 Required Workflow Integration
+
+**Before ANY implementation work**:
+1. Create Beads issue with clear description and governing docs referenced
+2. Mark all dependencies using `bd dep add` (blocks, related, parent-child, discovered-from)
+3. Use required NavisAI labels: components, packages, domains, types
+4. Update status with `bd update <id> --status <state>`
+
+**Issue Creation Requirements**:
+- Title format: "Brief action-oriented description"
+- Description MUST reference governing docs (Section 13.3)
+- Priority (0-4, 0=highest): P0 for critical, P1 for important, P2 for normal, P3+ for low
+- Type: `feature`, `bug`, `task`, `epic`, `chore`
+- Labels: At least one component/domain label per `docs/BEADS_WORKFLOW.md`
+
+**Session Management**:
+- Run `bd prime` at session start to load project context
+- Update issue statuses before session end
+- Reference Beads IDs in commit messages when applicable
+- Use `bd ready` to find unblocked work before starting new tasks
+
+**Dependency Management**:
+- `blocks`: Task B must complete before Task A
+- `related`: Soft connection, doesn't block progress
+- `parent-child`: Epic/subtask hierarchical relationship
+- `discovered-from`: Auto-created when discovering related work
+
+### 13.3 Documentation Compliance (Mandatory)
+
+All Beads issues **must** reference governing documentation:
+- Network/bridge changes → `docs/NETWORKING.md`
+- API/endpoints → `docs/IPC_TRANSPORT.md` + `packages/api-contracts`
+- Setup/UX changes → `docs/SETUP.md` + `docs/ONBOARDING_FLOW.md`
+- Security/auth → `docs/SECURITY.md` + `docs/AUTH_MODEL.md`
+- Beads workflow → `docs/BEADS_WORKFLOW.md` (this document's governing spec)
+
+### 13.4 High-Risk Operations Protocol
+
+Section 7 high-risk operations require Beads issues with:
+- `high-risk` label applied
+- Approval dependency noted in issue description
+- Rollback plan documented in issue comments
+- Dependency link: `bd dep add <issue-id> <approval-id> --type blocks`
+
+### 13.5 Multi-Agent Coordination
+
+**Work Reservation**:
+- Create Beads issue immediately to claim work areas
+- Check `bd ready` before starting to avoid conflicts
+- Update status to `in_progress` when beginning work
+- Mark `done` on completion to unblock dependent work
+
+**Cross-Session Continuity**:
+- Beads maintains context across agent sessions
+- Issues track implementation progress against specifications
+- Dependencies prevent work conflicts and ensure proper sequencing
+
+### 13.6 Verification & Enforcement
+
+Beads integration is verified by:
+- `scripts/verify-architecture.mjs` checks Beads documentation and configuration
+- Pre-commit hooks prevent non-compliant commits
+- `pnpm verify` includes Beads compliance checks
+- Claude Code hooks (`bd setup claude --project`) provide automatic context loading
+
+### 13.7 Required Commands
+
+All agents must use established Beads commands:
+- `bd prime` - Load project context (~2k tokens)
+- `bd create "Task"` - Create issue with doc references
+- `bd ready` - Find unblocked work
+- `bd dep add <id> <parent> --type <type>` - Add dependencies
+- `bd update <id> --status <done|in_progress>` - Track progress
+
+**Complete Command Reference**:
+```bash
+# Session workflow
+bd prime                    # Load context at start
+bd ready                    # Find unblocked work
+bd list                     # Show all issues
+bd show <issue-id>          # View issue details
+
+# Issue management
+bd create "Title" -t <type> -p <priority> -d "Description"
+bd update <id> --status <open|in_progress|done>
+bd close <id> --reason "Completed"
+bd label add <id> <label>
+
+# Dependencies
+bd dep add <id> <dep-id> --type blocks|related|parent-child|discovered-from
+bd dep tree <id>            # Visualize dependencies
+```
+
+**Example Issue Creation**:
+```bash
+# Bridge implementation
+bd create "Add intelligent routing to bridge" \
+  -t feature \
+  -p 1 \
+  -d "Implement routing engine per docs/BRIDGE_IMPLEMENTATION.md v0.2" \
+  && bd label add <new-id> bridge,networking
+
+# High-risk operation
+bd create "Update bridge to require admin privileges" \
+  -t task \
+  -p 0 \
+  -d "HIGH-RISK: Modifies system services. See docs/SECURITY.md" \
+  && bd label add <new-id> high-risk,security
+```
+
+### 13.8 Integration Status
+
+Beads integration is enforced through:
+- Governing document: `docs/BEADS_WORKFLOW.md`
+- Protocol definition: This Section 13 in AGENTS.md
+- Verification: `scripts/verify-architecture.mjs`
+- Tool integration: `package.json` scripts
+- Git hooks: Pre-commit enforcement
 
 ---
 

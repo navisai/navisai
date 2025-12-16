@@ -34,6 +34,19 @@ set -e
 
 echo "Running Navis architecture checks..."
 pnpm verify
+
+# Optional Beads verification if bd command is available
+if command -v bd >/dev/null 2>&1; then
+  echo "Verifying Beads integration..."
+  # Check if Beads is properly initialized
+  if [ -d ".beads" ]; then
+    echo "✅ Beads integration found"
+  else
+    echo "⚠️  Beads not initialized. Run 'pnpm beads:setup' to enable task tracking."
+  fi
+else
+  echo "ℹ️  Beads CLI not found. Install Beads for task tracking integration."
+fi
 `
 
   await writeHook('pre-commit', hook)

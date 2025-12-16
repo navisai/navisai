@@ -72,6 +72,7 @@ function ensureRequiredDocsExist() {
     'docs/AUTH_MODEL.md',
     'docs/LOCAL_FIRST_GUARANTEES.md',
     'docs/MACOS_SETUP_EXPERIENCE.md',
+    'docs/BEADS_WORKFLOW.md',
   ]
 
   for (const doc of required) {
@@ -92,11 +93,31 @@ function ensureCanonicalOriginInPwa() {
   }
 }
 
+function ensureBeadsIntegration() {
+  const agentsDoc = path.join(repoRoot, 'AGENTS.md')
+  if (!fs.existsSync(agentsDoc)) {
+    fail('Missing AGENTS.md')
+  }
+
+  const agentsContent = readUtf8(agentsDoc)
+
+  // Check for Section 13 - Beads Task Management Protocol
+  if (!agentsContent.includes('## 13. Beads Task Management Protocol')) {
+    fail('AGENTS.md must include Section 13: Beads Task Management Protocol')
+  }
+
+  // Check for BEADS_WORKFLOW.md reference in Section 0
+  if (!agentsContent.includes('docs/BEADS_WORKFLOW.md')) {
+    fail('AGENTS.md must reference docs/BEADS_WORKFLOW.md in Required Doc Cross-Checks')
+  }
+}
+
 function main() {
   ensureTopLevelDirectories()
   ensureWorkspacePackagesHaveManifest()
   ensureRequiredDocsExist()
   ensureCanonicalOriginInPwa()
+  ensureBeadsIntegration()
 }
 
 main()

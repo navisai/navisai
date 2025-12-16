@@ -31,6 +31,14 @@ coverage/
 .navis-cache/
 .navis-local/
 
+# Beads task tracking system
+.beads/daemon.lock
+.beads/daemon.pid
+.beads/daemon.log
+.beads/beads.db-shm
+.beads/beads.db-wal
+.beads/*.sock
+
 # OS files
 .DS_Store
 Thumbs.db
