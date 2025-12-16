@@ -238,6 +238,21 @@ async function launchMacOSSetupApp() {
   })
 }
 
+async function openUrl(url) {
+  const os = platform()
+  try {
+    if (os === 'darwin') {
+      await execAsync(`open "${url}"`)
+    } else if (os === 'linux') {
+      await execAsync(`xdg-open "${url}"`)
+    } else if (os === 'win32') {
+      await execAsync(`start "" "${url}"`, { shell: 'cmd.exe' })
+    }
+  } catch (error) {
+    console.log('⚠️  Unable to open browser automatically:', error.message)
+  }
+}
+
 export async function setupCommand(options = {}) {
   console.log('NavisAI Setup')
   console.log('=============\n')
@@ -756,6 +771,9 @@ export async function pairCommand(options = {}) {
 
     console.log(`🌐 Pairing URL: ${CANONICAL_ORIGIN}/pairing`)
     console.log('📱 Pairing Code:', pairingData.id.toUpperCase())
+    const pairingUrlWithToken = `${CANONICAL_ORIGIN}/pairing?token=${encodeURIComponent(pairingData.id)}`
+    console.log(`🌐 Shortcut URL: ${pairingUrlWithToken}`)
+    await openUrl(pairingUrlWithToken)
     console.log('\nWaiting for device to pair... (Press Ctrl+C to cancel)')
 
     // In a real implementation, this would monitor for pairing events

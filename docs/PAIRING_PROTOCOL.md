@@ -147,8 +147,10 @@ Sequence:
 
 5. User approves or rejects:
 
-   - Approve → device becomes trusted.
-   - Reject → pairingToken invalidated.
+- Approve → device becomes trusted.
+- Reject → pairingToken invalidated.
+
+> CLI integration: The `navisai pair` command fetches the short-lived token from `GET /pairing/qr`, prints it, and opens `https://navis.local/pairing?token=<token>` automatically so phones or desktop browsers that cannot scan the QR can land on the manual pairing form with the code already filled in.
 
 6. Client receives a response after approval/reject (long-polling semantics; exact transport can evolve):
 
