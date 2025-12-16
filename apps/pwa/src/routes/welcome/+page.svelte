@@ -57,6 +57,12 @@
           <p class="text-sm text-slate-600 mt-3">
             If the QR code doesn’t load, confirm the daemon is running and refresh.
           </p>
+          <a
+            href="/pairing"
+            class="mt-4 inline-flex items-center gap-2 rounded-full border border-slate-300 px-3 py-1 text-sm text-navy-700 hover:bg-navy-50"
+          >
+            Go to pairing page
+          </a>
         </div>
       </div>
     </section>
