@@ -78,6 +78,11 @@ Optionally offer to open the browser (opt-in or interactive prompt), rather than
 - mDNS fallback
 - Manual pairing page: `https://navis.local/pairing` (pre-fills the token when `navisai pair` or onboarding UI launches it with `?token=<polar>`). This is the recommended path for phones that cannot scan the QR code.
 
+BLE note (Android, no companion app):
+- The host emits an optional BLE onboarding signal while unpaired.
+- Android will not reliably show a system-level “Navis nearby” notification without an app.
+- Instead, the onboarding page offers an explicit “Scan for Navis” button (Web Bluetooth in Chrome) that confirms the signal with a user gesture, alongside QR and direct URL routes.
+
 `navisai pair` now fetches the short-lived token from the daemon and automatically opens the browser to `https://navis.local/pairing?token=<token>` so users land directly on the manual form with the code prefilled.
 
 ### 3.4 Pairing Approval

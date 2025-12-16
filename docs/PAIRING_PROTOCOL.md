@@ -98,10 +98,9 @@ The client scans the QR and sends the token to the daemon over HTTPS.
 
 ### BLE
 
-- BLE advertises a generic service name: `NavisAI-<short-host-id>`
-- BLE payload includes:
-  - a non-secret identifier
-  - the same host/port as QR
+- BLE is an optional onboarding signal and is intended to be time-limited while the daemon is unpaired or in explicit pairing mode.
+- BLE advertises a stable service UUID (no secrets). Clients can use this as a proximity confirmation signal.
+- BLE does **not** carry `pairingToken` or secrets, and should not be treated as an authentication mechanism.
 
 BLE does **not** carry pairingToken or secrets.
 
