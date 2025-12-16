@@ -158,7 +158,7 @@ export class NavisDaemon {
         if (!paired) {
           await this.bleAdvertiser?.start?.()
         }
-      } catch {}
+      } catch { }
 
       this.isRunning = true
 

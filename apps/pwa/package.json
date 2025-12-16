@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "echo \"PWA is served by the daemon. Use: pnpm --filter @navisai/pwa build && pnpm --filter @navisai/daemon dev\" && exit 1",
     "dev:standalone": "svelte-kit dev",
-    "build": "svelte-kit build",
+    "build": "vite build",
     "preview": "svelte-kit preview",
     "prepare": "svelte-kit sync || echo ''",
     "check": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json",
@@ -16,11 +16,11 @@
   },
   "devDependencies": {
     "@navisai/api-contracts": "workspace:*",
-    "@sveltejs/adapter-static": "^3.0.9",
+    "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.49.1",
     "@sveltejs/vite-plugin-svelte": "^6.2.1",
-    "@vite-pwa/sveltekit": "^1.1.0",
     "@tailwindcss/vite": "^4.1.18",
+    "@vite-pwa/sveltekit": "^1.1.0",
     "prettier": "^3.7.4",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "svelte": "^5.45.6",

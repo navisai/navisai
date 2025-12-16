@@ -41,18 +41,21 @@ Setup details: see `SETUP.md`.
   - REST API (see `IPC_TRANSPORT.md`)
   - WebSocket at `/ws`
 - Uses HTTPS + WSS with a certificate valid for `navis.local`.
-- **Paths are prefixed with `/navis`** when routed through the bridge.
+- **Always accessible at the root origin** (`https://navis.local/`) - no subdirectory routing.
 
-### 3.2 Navis Bridge (intelligent reverse proxy)
+### 3.2 Navis Bridge (packet forwarding)
 
-- Listens on **LAN** port **443** for `navis.local`.
-- **Automatically detects existing port 443 services** and configures routing accordingly.
-- **Routing behavior**:
-  - `/navis/*` → Navis daemon on `127.0.0.1:47621`
-  - `/*` (all other paths) → Local development app on port 443
-  - If no app on port 443: `/` → Navis daemon root (redirects to `/navis/welcome`)
-- Terminates TLS for routing, re-encrypts to daemon when forwarding.
-- **Graceful deferral**: If another service binds port 443 first, bridge waits and monitors.
+- Uses **OS-level packet forwarding** to selectively route traffic based on domain.
+- **Domain-based forwarding**:
+  - Traffic for `navis.local` → forwarded to daemon on `127.0.0.1:47621`
+  - Traffic for all other domains → passes through to existing services
+- **No TLS termination** - packets are forwarded transparently at network level.
+- **Always available**: Navis is accessible at `https://navis.local` regardless of other services.
+- **Packet-level routing**:
+  - macOS: pfctl with rdr rules based on Host header
+  - Linux: iptables with string matching
+  - Windows: netsh portproxy (limited to all traffic)
+- **No port conflicts**: Multiple services can share port 443 without conflicts.
 
 OS integration:
 - macOS: launchd LaunchDaemon (installed via `navisai setup`)
@@ -60,18 +63,19 @@ OS integration:
 - Windows: service
 
 Implementation note:
-- The bridge is an intelligent reverse proxy that can detect and route around existing services.
-- It installs itself with lower priority so existing services take precedence.
+- Packet forwarding rules are installed with OS-specific tools (pfctl, iptables, netsh).
+- Rules are added with priority based on packet inspection (Host header matching).
+- No service needs to "bind" port 443 exclusively - the OS handles routing at packet layer.
 
 ### 3.3 mDNS/Bonjour (LAN name resolution + discovery)
 
 - Ensures `navis.local` resolves on the LAN to the host machine's LAN IP.
 - Advertises the Navis service for discovery/diagnostics.
 - Clients use the canonical URL:
-  - `https://navis.local` (development app or Navis if no app present)
-  - `https://navis.local/navis/welcome` (always Navis onboarding)
-  - `https://navis.local/navis/*` (all Navis API/UI paths)
-  - `wss://navis.local/navis/ws` (Navis WebSocket)
+  - `https://navis.local` (always Navis - packet forwarded)
+  - `https://navis.local/welcome` (Navis onboarding)
+  - `https://navis.local/*` (all Navis API/UI paths)
+  - `wss://navis.local/ws` (Navis WebSocket)
 
 ---
 
@@ -81,11 +85,11 @@ Implementation note:
 
 `navisai setup` performs OS-level configuration:
 
-- Installs the Navis Bridge as an intelligent reverse proxy.
+- Installs packet forwarding rules for domain-based routing.
 - Enables mDNS advertisement for `navis.local`.
 - Generates/refreshes the `navis.local` certificate.
-- Detects existing port 443 usage and configures routing automatically.
-- Provides user guidance when port conflicts are detected.
+- Detects existing port 443 usage but proceeds regardless (no conflicts).
+- Installs OS service for managing packet forwarding rules.
 
 This step may require admin privileges once. It's explicit, reversible, and never silent.
 
@@ -93,29 +97,49 @@ This step may require admin privileges once. It's explicit, reversible, and neve
 
 `navisai up`:
 - Starts the daemon unprivileged.
-- Bridge automatically handles routing.
-- Prints (and optionally offers to open) `https://navis.local/navis/welcome`.
+- Packet forwarding routes `navis.local` to daemon.
+- Prints (and optionally offers to open) `https://navis.local/welcome`.
 
 ### 4.3 Development workflow
 
-1. Start your development app on port 443 (if needed)
+1. Start your development app (any port, even 443)
 2. Run `navisai up`
-3. Navis automatically routes:
-   - Your app: `https://navis.local`
-   - Navis UI: `https://navis.local/navis/*`
+3. Navis is always accessible at: `https://navis.local`
+   - No conflict with other apps due to domain-based forwarding
 
 ---
 
-## 5. Conflict Detection and Resolution
+## 5. Packet Forwarding Details
 
-The bridge continuously monitors port 443:
+### 5.1 No Conflicts by Design
 
-- **If port 443 is free**: Bind and route all traffic to Navis
-- **If port 443 is occupied**: 
-  - Monitor the service
-  - Attempt to inject routing for `/navis/*` paths
-  - If injection fails, notify user with clear guidance
-- **If service changes**: Automatically reconfigure routing
+Since packet forwarding operates at the network layer:
+- Multiple services can appear to use port 443 simultaneously
+- Domain (`navis.local`) determines routing, not port exclusivity
+- No need for port number juggling or complex conflict resolution
+
+### 5.2 Implementation by Platform
+
+**macOS**:
+```bash
+# Enable forwarding
+sudo sysctl -w net.inet.ip.forwarding=1
+
+# Add rule for navis.local
+echo "rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port 47621" | sudo pfctl -a navis -f -
+```
+
+**Linux**:
+```bash
+# Forward navis.local traffic
+sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -m string --string "Host: navis.local" -j DNAT --to-destination 127.0.0.1:47621
+```
+
+**Windows**:
+```cmd
+# Forward all 443 traffic (limited by Windows)
+netsh interface portproxy add v4tov4 listenport=443 listenaddress=0.0.0.0 connectport=47621 connectaddress=127.0.0.1
+```
 
 ---
 

@@ -12,16 +12,16 @@ Preferred macOS UX: see `MACOS_SETUP_EXPERIENCE.md`.
 Navis targets a single, clean LAN origin:
 
 - `https://navis.local` (no port)
-- Navis UI: `https://navis.local/navis/welcome`
-- Your app: `https://navis.local` (when port 443 is occupied)
-- WebSocket: `wss://navis.local/navis/ws`
+- Navis UI: `https://navis.local/welcome`
+- Your app: continues working as before (packet forwarding separates domains)
+- WebSocket: `wss://navis.local/ws`
 
 To make this work without requiring users to run `sudo` for daily usage, Navis requires a one-time setup step that:
 
-1. **Installs an intelligent Navis Bridge** that can handle port 443 conflicts gracefully.
+1. **Installs packet forwarding rules** that selectively route navis.local traffic to the daemon.
 2. Enables **mDNS/Bonjour** so `navis.local` resolves on the LAN to the host machine's LAN IP.
 3. Generates/refreshes local TLS material for `navis.local`.
-4. **Detects and routes around existing port 443 services** automatically.
+4. **No conflicts with existing services** - other apps continue working normally.
 5. Guides device trust for mobile clients (iOS requires explicit trust for local certificates).
 
 This step is explicit, user-consented, and reversible.
@@ -61,26 +61,23 @@ navisai setup
 
 ## 3. What `navisai setup` must do (spec)
 
-### 3.1 Intelligent Bridge service (reverse proxy on port 443)
+### 3.1 Packet forwarding service
 
 Requirements:
 
-- **Detects existing port 443 services** before binding
-- **Routes `/navis/*` paths** to Navis daemon on `127.0.0.1:47621`
-- **Routes all other paths** to the user's development app on port 443
-- **Terminates TLS** for path inspection, re-encrypts when forwarding
-- **Monitors for service changes** and reconfigures routing automatically
-- Managed by the OS service manager so it's "always there"
+- **Installs OS-level packet forwarding rules** for domain-based routing
+- **Routes `navis.local` traffic** to Navis daemon on `127.0.0.1:47621`
+- **Routes all other domains** through unchanged (no interference)
+- **No TLS termination** - operates at network layer
+- **Works alongside existing services** without conflicts
+- Managed by the OS service manager for persistence
 - Fully reversible (uninstall/disable)
 
-Routing behavior:
+Packet forwarding by platform:
 
-1. **Port 443 free**: Bridge binds directly, all traffic to Navis
-2. **Port 443 occupied**: 
-   - Attempts to inject itself as a proxy
-   - Routes `/navis/*` → daemon
-   - Routes `/*` → existing service
-3. **Injection fails**: Clear error message with alternatives
+1. **macOS**: pfctl with rdr rules for navis.local
+2. **Linux**: iptables with string matching on Host header
+3. **Windows**: netsh portproxy (forwards all 443 traffic)
 
 ### 3.2 mDNS/Bonjour for `navis.local`
 
@@ -113,10 +110,10 @@ navisai up
 ```
 
 Access URLs:
-- Navis UI: `https://navis.local/navis/welcome`
-- Your app: `https://navis.local` (if port 443 was occupied during setup)
+- Navis UI: `https://navis.local/welcome`
+- Your app: continues working as before (domain-based routing separates traffic)
 
-The bridge handles routing transparently.
+Packet forwarding handles routing transparently.
 
 ---
 
@@ -125,17 +122,17 @@ The bridge handles routing transparently.
 `navisai doctor` must report:
 
 - Bridge status (installed/enabled, routing mode)
-- Port 443 detection (free/occupied, service name)
+- Port 443 detection (in use by other services)
 - mDNS status (`navis.local` resolution)
 - TLS status (certificate validity)
-- Daemon status (`GET /navis/status`)
-- Routing table (what paths go where)
+- Daemon status (`GET /status`)
+- Packet forwarding rules status
 
 Example output:
 ```
-✅ Bridge: Enabled (intelligent routing mode)
-✅ Port 443: Occupied by nginx
-✅ Routing: /navis/* → Navis, /* → nginx
+✅ Packet forwarding: Enabled (domain-based routing)
+✅ Port 443: Available for other services
+✅ Forwarding: navis.local → daemon:47621
 ✅ mDNS: navis.local → 192.168.1.100
 ✅ TLS: Valid until 2025-12-31
 ✅ Daemon: Running
@@ -186,16 +183,16 @@ For repeatable onboarding tests, Navis supports a **confirm-gated** cleanup comm
 
 ## 8. Port Conflict Resolution Flow
 
-When `navisai setup` detects port 443 usage:
+When `navisai setup` runs (regardless of port 443 usage):
 
-1. **Identify the service** (process name, PID)
-2. **Explain the situation**: "Port 443 is used by [nginx]. Navis will route to your app at https://navis.local and to Navis at https://navis.local/navis/*"
-3. **Show routing plan**:
-   - Your app: https://navis.local
-   - Navis UI: https://navis.local/navis/welcome
-4. **Attempt installation**
-5. **If routing fails**:
-   - Clear explanation of why
+1. **Install packet forwarding rules** for navis.local domain
+2. **Explain what's happening**: "Navis will use packet forwarding to route navis.local traffic to the daemon without interfering with other services"
+3. **Show access plan**:
+   - Navis UI: https://navis.local/welcome
+   - Your apps: continue working unchanged
+4. **Install OS service** to manage forwarding rules
+5. **If installation fails**:
+   - Clear explanation and manual steps
    - Offer alternatives:
      - Temporarily stop the other service
      - Use a different port for testing

@@ -44,11 +44,11 @@ The goal is not "no admin approval ever", but:
 
 Install a small "Navis Bridge" component that:
 
-- Binds `0.0.0.0:443` (LAN) as an **intelligent reverse proxy**
-- **Detects existing port 443 services** and routes accordingly
-- Routes `/navis/*` paths to Navis daemon on `127.0.0.1:47621`
-- Routes all other paths to the user's development app on port 443
-- Terminates TLS for routing, re-encrypts when forwarding to daemon
+- Installs **packet forwarding rules** for domain-based routing
+- **No port conflicts** - works alongside existing services
+- Routes `navis.local` traffic to daemon on `127.0.0.1:47621`
+- Routes all other domain traffic unchanged
+- No TLS termination - operates at network layer
 
 Managed by:
 - `launchd` LaunchDaemon (system domain)
@@ -57,20 +57,20 @@ Managed by:
 
 - A standard macOS installer UI (signed `.pkg`) or a small macOS Setup app.
 - A single macOS authentication sheet for admin approval.
-- **Smart detection**: Setup app detects if port 443 is already in use.
+- **Always works**: Packet forwarding doesn't conflict with other services.
 - A final success screen that opens:
-  - `https://navis.local/navis/welcome` (Navis UI)
-  - Instructions that their app is available at `https://navis.local`
+  - `https://navis.local/welcome` (Navis UI)
+  - Instructions that their apps continue working normally
 
 ### 3.3 Setup app responsibilities
 
 A "Navis Setup" app provides the Apple-like experience:
 
-- Shows clear status: Bridge, mDNS, TLS, daemon, Port 443 detection
-- **Port 443 intelligence**:
-  - Shows "Port 443 is in use by [app name]"
-  - Explains automatic routing setup
-  - Warns if routing injection might fail
+- Shows clear status: Packet forwarding, mDNS, TLS, daemon
+- **No conflicts**:
+  - Shows "Packet forwarding enabled for navis.local"
+  - Explains domain-based routing
+  - No interference with other services
 - Runs diagnostics equivalent to `navisai doctor`
 - Offers "Enable" / "Disable" buttons
 - Provides QR + pairing onboarding deep link
@@ -94,10 +94,10 @@ Goal: one standard macOS admin sheet, seamless integration with existing apps.
    - Explain the automatic routing setup
    - Show how Navis will integrate with existing app
 6. Setup app requests admin approval and installs the intelligent bridge.
-7. Bridge automatically configures routing based on detected services.
+7. Packet forwarding rules are installed (no service interruption).
 8. Setup app shows success and opens:
-   - `https://navis.local/navis/welcome`
-   - Note about accessing their app at `https://navis.local`
+   - `https://navis.local/welcome`
+   - Note that other apps continue working normally
 
 ### Uninstall / Disable (clean and safe)
 
@@ -116,15 +116,15 @@ Goal: clean removal without disrupting user's development setup.
 
 ## 4. Intelligent Routing Behavior
 
-### 4.1 When port 443 is free
-- Navis owns port 443 directly
-- `https://navis.local` → Navis (redirects to `/navis/welcome`)
+### 4.1 Packet forwarding always enabled
+- Domain-based routing, no port conflicts
+- `https://navis.local` → Navis daemon (port 443 forwarded to 47621)
+- `https://other-domain.local` → Passes through unchanged
 
-### 4.2 When port 443 is occupied
-- Bridge injects itself as a proxy
-- `https://navis.local/navis/*` → Navis daemon
-- `https://navis.local/*` → User's development app
-- **Transparent to the user's app** - no configuration needed
+### 4.2 Benefits of packet forwarding
+- **No port exclusivity** - multiple services can use port 443
+- **Domain-based separation** - navis.local always goes to Navis
+- **Transparent** - other apps work without changes
 
 ### 4.3 Conflict resolution
 - If routing injection fails:
@@ -176,10 +176,10 @@ The NPM CLI remains the developer control surface:
 - **Conflict warnings**: Clear messaging about potential issues
 - **Preflight diagnostics**: Bridge, daemon, TLS, mDNS, port usage
 
-### 7.2 Bridge requirements
-- **Path-based routing**: `/navis/*` → daemon
-- **Default routing**: `/*` → port 443 app
-- **TLS handling**: Terminate and re-encrypt as needed
+### 7.2 Packet forwarding requirements
+- **Domain-based routing**: navis.local → daemon:47621
+- **Pass-through**: All other domains unchanged
+- **No TLS termination**: Operates at network layer
 - **Service monitoring**: Detect and adapt to changes
 
 ### 7.3 CLI integration
