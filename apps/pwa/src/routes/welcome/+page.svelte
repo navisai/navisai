@@ -2,6 +2,19 @@
   <title>Welcome - Navis AI</title>
 </svelte:head>
 
+<script lang="ts">
+  import { onMount } from 'svelte'
+  import PairingModal from '$lib/components/PairingModal.svelte'
+  import { isPaired, pairedDevice } from '$lib/stores/device'
+
+  let pairingOpen = false
+  let tokenFromUrl = ''
+
+  onMount(() => {
+    tokenFromUrl = new URLSearchParams(location.search).get('token') ?? ''
+  })
+</script>
+
 <div class="page-padding">
   <main class="max-w-3xl mx-auto py-12">
     <header class="section-spacing">
@@ -10,6 +23,11 @@
         Navis runs on your machine and is reachable on your LAN at
         <span class="font-mono text-slate-900">https://navis.local</span>.
       </p>
+      {#if $isPaired && $pairedDevice}
+        <p class="text-sm text-slate-600 mt-3">
+          Paired as <span class="font-medium text-slate-900">{$pairedDevice.deviceName}</span>.
+        </p>
+      {/if}
     </header>
 
     <section class="section-spacing">
@@ -57,12 +75,21 @@
           <p class="text-sm text-slate-600 mt-3">
             If the QR code doesn’t load, confirm the daemon is running and refresh.
           </p>
-          <a
-            href="/pairing"
-            class="mt-4 inline-flex items-center gap-2 rounded-full border border-slate-300 px-3 py-1 text-sm text-navy-700 hover:bg-navy-50"
-          >
-            Go to pairing page
-          </a>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              class="btn btn-primary"
+              on:click={() => (pairingOpen = true)}
+            >
+              Pair a device
+            </button>
+            <a
+              href="/pairing"
+              class="btn btn-secondary"
+            >
+              Open full pairing page
+            </a>
+          </div>
         </div>
       </div>
     </section>
@@ -76,3 +103,9 @@
     </section>
   </main>
 </div>
+
+<PairingModal
+  open={pairingOpen}
+  initialToken={tokenFromUrl}
+  on:close={() => (pairingOpen = false)}
+/>

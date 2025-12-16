@@ -1,68 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { apiClient } from '$lib/api/client'
-  import { setDeviceStore } from '$lib/stores/device'
+  import PairingForm from '$lib/components/PairingForm.svelte'
 
-  let pairingToken = ''
-  let clientName = ''
-  let clientDeviceInfo = ''
-  let statusMessage = ''
-  let isSubmitting = false
-  const exampleMetadata = '{"platform":"iOS","model":"iPhone 15"}'
-  const fieldIds = {
-    token: 'pairing-token',
-    name: 'pairing-name',
-    metadata: 'pairing-metadata'
-  }
-
-  const defaultName = 'Phone'
-
-  async function handlePair(event: Event) {
-    event.preventDefault()
-    if (!pairingToken.trim()) {
-      statusMessage = 'Enter the pairing token from the QR code or host dashboard.'
-      return
-    }
-
-    let metadata
-    if (clientDeviceInfo.trim()) {
-      try {
-        metadata = JSON.parse(clientDeviceInfo)
-      } catch {
-        statusMessage = 'Device metadata must be valid JSON.'
-        return
-      }
-    }
-
-    isSubmitting = true
-    statusMessage = ''
-
-    try {
-      const pairingData = await apiClient.startPairing({
-        pairingToken: pairingToken.trim(),
-        clientName: clientName.trim() || defaultName,
-        clientDeviceInfo: metadata
-      })
-      setDeviceStore({
-        deviceId: pairingData.deviceId,
-        deviceSecret: pairingData.deviceSecret,
-        deviceName: pairingData.deviceName || clientName.trim() || defaultName
-      })
-      statusMessage =
-        'Pairing successful! Your device is now trusted and can access Navis AI over HTTPS.'
-    } catch (error) {
-      statusMessage =
-        error instanceof Error ? error.message : 'Pairing failed. Try again or refresh.'
-    } finally {
-      isSubmitting = false
-    }
-  }
-
+  let tokenFromUrl = ''
   onMount(() => {
-    const pathToken = new URLSearchParams(location.search).get('token')
-    if (pathToken) {
-      pairingToken = pathToken
-    }
+    tokenFromUrl = new URLSearchParams(location.search).get('token') ?? ''
   })
 </script>
 
@@ -81,57 +23,7 @@
           Enter the pairing token shown in the onboarding QR code. After approval, Navis will
           supply a trusted credential pair (deviceId + secret) and you can reconnect securely.
         </p>
-        <form class="space-y-4" on:submit|preventDefault={handlePair}>
-          <div>
-            <label for={fieldIds.token} class="text-sm font-medium text-slate-700">Pairing Token</label>
-            <input
-              id={fieldIds.token}
-              type="text"
-              bind:value={pairingToken}
-              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-navy-500"
-              placeholder="e.g., A1B2C3D4E5"
-              required
-            />
-          </div>
-          <div>
-            <label for={fieldIds.name} class="text-sm font-medium text-slate-700">Device Name</label>
-            <input
-              id={fieldIds.name}
-              type="text"
-              bind:value={clientName}
-              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-navy-500"
-              placeholder="Device Friendly Name"
-            />
-          </div>
-          <div>
-            <label for={fieldIds.metadata} class="text-sm font-medium text-slate-700"
-              >Optional device metadata (JSON)</label
-            >
-            <textarea
-              id={fieldIds.metadata}
-              rows="3"
-              bind:value={clientDeviceInfo}
-              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-navy-500"
-              placeholder={exampleMetadata}
-            ></textarea>
-          </div>
-          <div class="flex flex-col gap-1">
-            <button
-              type="submit"
-              class="btn btn-primary"
-              disabled={isSubmitting}
-            >
-              {#if isSubmitting}
-                Pairing…
-              {:else}
-                Start Pairing
-              {/if}
-            </button>
-            {#if statusMessage}
-              <p class="text-sm text-slate-600">{statusMessage}</p>
-            {/if}
-          </div>
-        </form>
+        <PairingForm initialToken={tokenFromUrl} />
       </div>
     </section>
 

@@ -107,7 +107,9 @@ function clearStoredCredentials() {
 
 function bufferToHex(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
+  return Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
 }
 
 function bufferToBase64(buffer: ArrayBuffer): string {
@@ -162,7 +164,11 @@ async function hmacBase64(message: string, secret: string): Promise<string> {
   return bufferToBase64(signature)
 }
 
-async function buildAuthHeaders(method: string, path: string, body: string): Promise<Record<string, string>> {
+async function buildAuthHeaders(
+  method: string,
+  path: string,
+  body: string
+): Promise<Record<string, string>> {
   if (!credentials || !hasWebCrypto) {
     return {}
   }
@@ -173,7 +179,7 @@ async function buildAuthHeaders(method: string, path: string, body: string): Pro
   const canonical = `${method}\n${canonicalPath}\n${bodyHash}\n${timestamp}`
   const signature = await hmacBase64(canonical, credentials.deviceSecret)
   return {
-    Authorization: `Navis deviceId="${credentials.deviceId}",signature="${signature}",timestamp="${timestamp}"`
+    Authorization: `Navis deviceId="${credentials.deviceId}",signature="${signature}",timestamp="${timestamp}"`,
   }
 }
 
@@ -200,7 +206,11 @@ class ApiClient {
     void this.connectWebSocket()
   }
 
-  async request(method: string, path: string, options: { body?: string; headers?: Record<string, string> } = {}) {
+  async request(
+    method: string,
+    path: string,
+    options: { body?: string; headers?: Record<string, string> } = {}
+  ) {
     const payload = options.body || ''
     const authHeaders = await buildAuthHeaders(method, path, payload)
     const response = await fetch(`${API_BASE}${path}`, {
@@ -237,7 +247,7 @@ class ApiClient {
     const payload = JSON.stringify({ path, options })
     const response = await this.request('POST', NAVIS_PATHS.discovery.scan, {
       body: payload,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     })
     if (!response.ok) {
       const error = await response.json()
@@ -259,8 +269,8 @@ class ApiClient {
     const response = await this.request('POST', NAVIS_PATHS.pairing.start, {
       body,
       headers: {
-        'Content-Type': 'application/json'
-      }
+        'Content-Type': 'application/json',
+      },
     })
     if (!response.ok) {
       const error = await response.json().catch(() => null)
@@ -275,7 +285,7 @@ class ApiClient {
     await this.setDeviceCredentials({
       deviceId: data.deviceId,
       deviceSecret: data.deviceSecret,
-      deviceName: data.deviceName || payload.clientName
+      deviceName: data.deviceName || payload.clientName,
     })
 
     return data
@@ -285,7 +295,7 @@ class ApiClient {
     const payload = JSON.stringify({ paths })
     const response = await this.request('POST', NAVIS_PATHS.discovery.index, {
       body: payload,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     })
     if (!response.ok) {
       const error = await response.json()
@@ -309,9 +319,7 @@ class ApiClient {
 
   async resolveApproval(id: string, action: 'approve' | 'reject'): Promise<Approval> {
     const path =
-      action === 'approve'
-        ? NAVIS_PATHS.approvals.approve(id)
-        : NAVIS_PATHS.approvals.reject(id)
+      action === 'approve' ? NAVIS_PATHS.approvals.approve(id) : NAVIS_PATHS.approvals.reject(id)
     const response = await this.request('POST', path, {
       body: '',
     })
@@ -357,12 +365,12 @@ class ApiClient {
       setTimeout(() => void this.connectWebSocket(), 3000)
     }
 
-    this.ws.onerror = (error) => {
+    this.ws.onerror = error => {
       console.error('WebSocket error:', error)
       this.emit('error', error)
     }
 
-    this.ws.onmessage = (event) => {
+    this.ws.onmessage = event => {
       try {
         const data = JSON.parse(event.data)
         this.emit('message', data)
