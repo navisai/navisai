@@ -55,6 +55,7 @@ import { ProjectService } from './services/project.js'
 import { SessionService } from './services/session.js'
 import { ApprovalService } from './services/approval.js'
 import { PairingService } from './services/pairing.js'
+import { BleAdvertiser } from './services/ble.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -90,6 +91,7 @@ export class NavisDaemon {
     this.sessionService = null
     this.approvalService = null
     this.pairingService = null
+    this.bleAdvertiser = null
 
     // mDNS responder
     this.mdns = null
@@ -150,6 +152,14 @@ export class NavisDaemon {
         await this.setupMDNS()
       }
 
+      // Optional BLE onboarding signal (only when unpaired)
+      try {
+        const paired = this.pairingService ? await this.pairingService.hasPairedDevices() : false
+        if (!paired) {
+          await this.bleAdvertiser?.start?.()
+        }
+      } catch {}
+
       this.isRunning = true
 
       console.log(`\n✅ Navis daemon is running!`)
@@ -182,9 +192,12 @@ export class NavisDaemon {
     this.approvalService = new ApprovalService()
     await this.approvalService.initialize()
 
+    this.bleAdvertiser = new BleAdvertiser()
+
     this.pairingService = new PairingService({
       approvalService: this.approvalService,
       dbManager: this.dbManager,
+      bleAdvertiser: this.bleAdvertiser,
     })
     await this.pairingService.initialize()
   }
@@ -509,6 +522,8 @@ pnpm --filter @navisai/daemon dev</code></pre>
       this.mdns.destroy()
       this.mdns = null
     }
+
+    await this.bleAdvertiser?.stop?.()
 
     if (this.wsManager) {
       await this.wsManager.close()

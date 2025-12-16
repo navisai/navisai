@@ -42,6 +42,9 @@
     "selfsigned": "^5.2.0",
     "ws": "^8.18.3"
   },
+  "optionalDependencies": {
+    "@abandonware/bleno": "^0.5.1"
+  },
   "devDependencies": {
     "@types/multicast-dns": "^7.2.4"
   }

@@ -7,21 +7,23 @@ import { randomBytes, createHash } from 'node:crypto'
 import QRCode from 'qrcode'
 
 export class PairingService {
-  constructor({ approvalService, dbManager } = {}) {
+  constructor({ approvalService, dbManager, bleAdvertiser } = {}) {
     this.devices = new Map()
     this.pairingTokens = new Map()
     this.pendingApprovals = new Map()
     this.approvalService = approvalService || null
     this.dbManager = dbManager || null
+    this.bleAdvertiser = bleAdvertiser || null
   }
 
   async initialize() {
     console.log('📱 Pairing service initialized')
   }
 
-  setDependencies({ approvalService, dbManager }) {
+  setDependencies({ approvalService, dbManager, bleAdvertiser }) {
     if (approvalService) this.approvalService = approvalService
     if (dbManager) this.dbManager = dbManager
+    if (bleAdvertiser) this.bleAdvertiser = bleAdvertiser
   }
 
   async generateQR() {
@@ -154,6 +156,7 @@ export class PairingService {
       try {
         const device = await this.createTrustedDevice({ name: clientName })
         this.pairingTokens.delete(pairingToken)
+        await this.bleAdvertiser?.stop?.()
         resolve({
           deviceId: device.id,
           deviceSecret: device.deviceSecret,

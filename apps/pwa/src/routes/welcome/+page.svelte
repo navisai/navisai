@@ -9,10 +9,39 @@
 
   let pairingOpen = false
   let tokenFromUrl = ''
+  let bleStatus: 'idle' | 'unsupported' | 'ready' | 'scanning' | 'found' | 'error' = 'idle'
+  let bleError = ''
+
+  const BLE_SERVICE_UUID = '9f3a2b40-7f6b-4f13-8f1e-0b7a49b4a0a1'
 
   onMount(() => {
     tokenFromUrl = new URLSearchParams(location.search).get('token') ?? ''
+    if (typeof navigator !== 'undefined' && 'bluetooth' in navigator) {
+      bleStatus = 'ready'
+    } else {
+      bleStatus = 'unsupported'
+    }
   })
+
+  async function scanBluetooth() {
+    bleError = ''
+    const nav = navigator as Navigator & { bluetooth?: any }
+    if (!nav.bluetooth) {
+      bleStatus = 'unsupported'
+      return
+    }
+    bleStatus = 'scanning'
+    try {
+      const device = await nav.bluetooth.requestDevice({
+        filters: [{ services: [BLE_SERVICE_UUID] }],
+        optionalServices: [BLE_SERVICE_UUID],
+      })
+      if (device) bleStatus = 'found'
+    } catch (error) {
+      bleStatus = 'error'
+      bleError = error instanceof Error ? error.message : 'Bluetooth scan failed.'
+    }
+  }
 </script>
 
 <div class="page-padding">
@@ -89,6 +118,35 @@
             >
               Open full pairing page
             </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 panel">
+        <div class="panel-header">
+          <h3>Bluetooth (Android)</h3>
+        </div>
+        <div class="panel-body">
+          <p class="text-sm text-slate-600">
+            If you’re on Android Chrome, you can confirm the onboarding signal over Bluetooth. This
+            requires a tap and may show a device picker.
+          </p>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              on:click={scanBluetooth}
+              disabled={bleStatus === 'unsupported' || bleStatus === 'scanning'}
+            >
+              {bleStatus === 'scanning' ? 'Scanning…' : 'Scan for Navis'}
+            </button>
+            {#if bleStatus === 'found'}
+              <span class="text-sm text-emerald-700">Navis detected nearby.</span>
+            {:else if bleStatus === 'unsupported'}
+              <span class="text-sm text-slate-600">Bluetooth scanning not supported in this browser.</span>
+            {:else if bleStatus === 'error'}
+              <span class="text-sm text-rose-700">{bleError}</span>
+            {/if}
           </div>
         </div>
       </div>
