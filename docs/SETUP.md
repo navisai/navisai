@@ -164,3 +164,26 @@ For mainstream users, the preferred path is the macOS Setup app described in `MA
 - **Enable** installs the bridge LaunchDaemon (one-time admin sheet), then opens `https://navis.local/welcome`.
 - **Disable** removes the bridge LaunchDaemon (one-time admin sheet). This does not delete user data.
 - “Reset data…” is separate and requires explicit confirmation if it removes `~/.navis/db.sqlite` or certificates.
+
+## 7. Cleanup (factory reset for testing)
+
+For repeatable onboarding tests, Navis supports a **confirm-gated** cleanup command that can remove both system setup artifacts and local state.
+
+### 7.1 `navisai cleanup` modes
+
+- `navisai cleanup --bridge-only` (safe/default behavior):
+  - Equivalent to `navisai reset`.
+  - Removes the OS bridge service and optionally TLS certs.
+  - Does **not** delete the database or user state.
+
+- `navisai cleanup --all` (destructive):
+  - Removes the OS bridge service.
+  - Optionally removes TLS certs (`~/.navis/certs/`).
+  - Removes local state under `~/.navis/` including `~/.navis/db.sqlite` (paired devices, approvals, preferences).
+
+### 7.2 Safety requirements
+
+- Must present a clear summary of what will be deleted before executing.
+- Must require explicit user confirmation for destructive deletes (typed confirmation, not a yes/no).
+- Must stop the daemon before deleting local state (or refuse until stopped).
+- Must never run automatically on install or on `navisai up`.

@@ -104,6 +104,16 @@ async function confirm(question) {
   }
 }
 
+async function confirmTyped(promptText, requiredPhrase) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+  try {
+    const answer = await rl.question(`${promptText}\nType "${requiredPhrase}" to continue: `)
+    return answer.trim() === requiredPhrase
+  } finally {
+    rl.close()
+  }
+}
+
 function escapeAppleScriptString(value) {
   return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
 }
@@ -596,6 +606,62 @@ export async function doctorCommand() {
     console.log('\n⚠️  Some issues found. See above for details.')
     process.exit(1)
   }
+}
+
+export async function cleanupCommand(options = {}) {
+  const bridgeOnly = Boolean(options.bridgeOnly) || !options.all
+  const destructiveAll = Boolean(options.all)
+
+  console.log('NavisAI Cleanup')
+  console.log('==============\n')
+
+  if (bridgeOnly && destructiveAll) {
+    console.error('Choose only one: --bridge-only or --all')
+    process.exit(1)
+  }
+
+  if (bridgeOnly) {
+    console.log('Mode: bridge-only (non-destructive)')
+    console.log('- Removes OS bridge service (443 entrypoint)')
+    console.log('- Optionally removes TLS certs from ~/.navis/certs')
+    console.log('- Keeps local state (DB, paired devices, preferences)\n')
+    await resetCommand()
+    return
+  }
+
+  console.log('Mode: ALL (destructive factory reset)')
+  console.log('- Removes OS bridge service (443 entrypoint)')
+  console.log('- Optionally removes TLS certs from ~/.navis/certs')
+  console.log('- Deletes local state under ~/.navis (including db.sqlite)\n')
+
+  const daemonProcess = await findDaemonProcess()
+  if (daemonProcess) {
+    console.log('Stopping Navis daemon before deleting local state...')
+    await downCommand()
+  }
+
+  const phrase = 'DELETE ~/.navis'
+  const ok = await confirmTyped(
+    `This will permanently delete local Navis state at ${path.join(homedir(), '.navis')}.\nThis cannot be undone.`,
+    phrase
+  )
+  if (!ok) {
+    console.log('Canceled.')
+    return
+  }
+
+  console.log('\nRemoving the Navis Bridge (requires admin privileges)...')
+  await uninstallBridge()
+  console.log('✅ Bridge removed.')
+
+  const removeCerts = await confirm('Also remove TLS certificates from ~/.navis/certs?')
+  if (removeCerts) {
+    await removeTlsMaterials()
+  }
+
+  console.log('\nDeleting ~/.navis local state...')
+  await fs.rm(path.join(homedir(), '.navis'), { recursive: true, force: true })
+  console.log('✅ Local state removed.')
 }
 
 export async function logsCommand() {

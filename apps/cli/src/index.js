@@ -12,6 +12,7 @@ import {
   indexCommand,
   pairCommand,
   resetCommand,
+  cleanupCommand,
 } from './commands.js'
 
 // CLI configuration
@@ -75,6 +76,13 @@ program
   .command('reset')
   .description('Reset local Navis setup (bridge/mDNS/certs)')
   .action(resetCommand)
+
+program
+  .command('cleanup')
+  .description('Factory reset for repeatable onboarding tests (confirm-gated)')
+  .option('--bridge-only', 'Remove bridge (+ optional certs); keep local state')
+  .option('--all', 'Remove bridge + delete ~/.navis local state (destructive)')
+  .action(cleanupCommand)
 
 // Parse command line arguments
 program.parse()
