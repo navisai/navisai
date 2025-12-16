@@ -1,33 +1,38 @@
 #!/usr/bin/env node
 
-import { exec as execCb } from 'node:child_process'
+import { exec as execCb, execFile as execFileCb } from 'node:child_process'
 import { promisify } from 'node:util'
 import { installBridge, uninstallBridge } from './bridge.js'
 
 const execAsync = promisify(execCb)
+const execFileAsync = promisify(execFileCb)
+
+function escapeAppleScriptString(value) {
+  return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n')
+}
+
+async function runOsascript(script) {
+  const { stdout } = await execFileAsync('osascript', ['-e', script])
+  return stdout.trim()
+}
 
 async function displayDialog(message, buttons = ['Cancel', 'Install'], defaultButton = 'Install') {
-  const buttonList = buttons.map(b => `"${b}"`).join(', ')
+  const defaultIndex = Math.max(1, buttons.indexOf(defaultButton) + 1)
   const script = `
-    display dialog "${escapeAppleScriptString(message)}"
-    buttons {${buttonList}}
-    default button "${defaultButton}"
-    with title "Navis Setup"
-    with icon note
-  `
-  const { stdout } = await execAsync(`osascript -e ${escapeAppleScriptString(script)}`)
-  return stdout.trim()
+tell application "System Events" to activate
+set dialogText to "${escapeAppleScriptString(message)}"
+set userChoice to button returned of (display dialog dialogText buttons {"${buttons.join('", "')}"} default button ${defaultIndex})
+return userChoice
+`
+  return runOsascript(script)
 }
 
 async function showAlert(title, message) {
   const script = `
-    display dialog "${escapeAppleScriptString(message)}" buttons {"OK"} default button "OK" with title "${title}" with icon caution
-  `
-  await execAsync(`osascript -e ${escapeAppleScriptString(script)}`)
-}
-
-function escapeAppleScriptString(value) {
-  return `"${value.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`
+tell application "System Events" to activate
+display dialog "${escapeAppleScriptString(message)}" buttons {"OK"} default button "OK"
+`
+  await runOsascript(script)
 }
 
 async function openOnboarding() {
@@ -69,7 +74,7 @@ async function main() {
     bridgeInstalled
       ? 'Choose Disable to remove the bridge. This does NOT delete your local data.'
       : 'Choose Enable to install the bridge. This is a one-time action and will prompt for your password via the standard macOS security sheet.',
-  ].join('\\n')
+  ].join('\n')
 
   const buttons = bridgeInstalled ? ['Cancel', 'Disable', 'Open onboarding'] : ['Cancel', 'Enable']
   const defaultButton = bridgeInstalled ? 'Open onboarding' : 'Enable'
@@ -81,9 +86,8 @@ async function main() {
       await installBridge('darwin')
       await showAlert(
         'Enabled',
-        'Navis Bridge is enabled. Start Navis with `navisai up`, then open https://navis.local/welcome.'
+        'Navis Bridge is enabled. Start Navis with `navisai up` to begin onboarding at https://navis.local/welcome.'
       )
-      await openOnboarding()
       return
     }
 
