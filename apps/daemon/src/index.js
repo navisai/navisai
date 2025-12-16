@@ -5,9 +5,14 @@
  */
 
 import daemon from '../daemon.js'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // Start daemon if run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+const selfPath = fileURLToPath(import.meta.url)
+const argvPath = process.argv[1] ? path.resolve(process.argv[1]) : null
+
+if (argvPath && path.resolve(selfPath) === argvPath) {
   daemon.start().catch((error) => {
     console.error('Failed to start daemon:', error)
     process.exit(1)

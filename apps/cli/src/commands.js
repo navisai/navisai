@@ -1,6 +1,7 @@
 import { exec, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import fs from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir, networkInterfaces, platform } from 'node:os'
@@ -346,10 +347,24 @@ export async function upCommand(options = {}) {
       env.NAVIS_PORT = options.port
     }
 
-    // Start daemon with spawn
+    // Start daemon with spawn (capture logs to ~/.navis/logs when possible)
+    const logsDir = path.join(homedir(), '.navis', 'logs')
+    const outLogPath = path.join(logsDir, 'daemon.out.log')
+    const errLogPath = path.join(logsDir, 'daemon.err.log')
+
+    let stdio = 'ignore'
+    try {
+      await fs.mkdir(logsDir, { recursive: true })
+      const outFd = await fs.open(outLogPath, 'a')
+      const errFd = await fs.open(errLogPath, 'a')
+      stdio = ['ignore', outFd.fd, errFd.fd]
+    } catch {
+      // If we cannot write logs, keep the daemon detached and silent.
+    }
+
     const daemon = spawn(process.execPath, [daemonPath], {
       detached: true,
-      stdio: 'ignore',
+      stdio,
       env,
     })
 
@@ -376,14 +391,25 @@ export async function upCommand(options = {}) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         console.log(`🌐 Access at: ${CANONICAL_ORIGIN}`)
         console.log(`📱 Onboarding: ${CANONICAL_ORIGIN}${NAVIS_PATHS.welcome}`)
+        if (options.open !== false) {
+          await openUrl(`${CANONICAL_ORIGIN}${NAVIS_PATHS.welcome}`)
+        }
         return
       } catch {
         console.log('\n⚠️  Daemon started but is not reachable at the canonical origin')
         console.log(`   Expected: ${CANONICAL_ORIGIN}`)
         console.log('   Run: navisai doctor')
+        if (existsSync(outLogPath) || existsSync(errLogPath)) {
+          console.log(`   Logs: ${outLogPath}`)
+          console.log(`         ${errLogPath}`)
+        }
       }
     } else {
       console.log('❌ Failed to start daemon')
+      if (existsSync(outLogPath) || existsSync(errLogPath)) {
+        console.log(`   Logs: ${outLogPath}`)
+        console.log(`         ${errLogPath}`)
+      }
     }
   } catch (error) {
     console.error('Failed to start daemon:', error.message)

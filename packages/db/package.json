@@ -11,6 +11,7 @@
     "./repositories.js": "./repositories.js"
   },
   "dependencies": {
+    "@libsql/client": "^0.10.0",
     "@navisai/logging": "workspace:*",
     "drizzle-orm": "^0.35.0",
     "nanoid": "^5.0.7"

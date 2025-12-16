@@ -30,6 +30,7 @@ program
   .command('up')
   .description('Start the Navis daemon')
   .option('-p, --port <number>', 'Port to run the daemon on (default: 47621)')
+  .option('--no-open', 'Do not open the onboarding URL in the browser')
   .action(upCommand)
 
 program
