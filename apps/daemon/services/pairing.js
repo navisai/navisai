@@ -157,6 +157,7 @@ export class PairingService {
         resolve({
           deviceId: device.id,
           deviceSecret: device.deviceSecret,
+          deviceName: device.name,
           apiBaseUrl: 'https://navis.local',
         })
       } catch (error) {
@@ -184,7 +185,7 @@ export class PairingService {
       [deviceId, name, deviceSecret, now, now]
     )
 
-    return { id: deviceId, deviceSecret }
+    return { id: deviceId, deviceSecret, name }
   }
 
   async hasPairedDevices() {

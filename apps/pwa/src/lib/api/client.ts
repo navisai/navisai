@@ -67,6 +67,7 @@ export interface ScanOptions {
 export interface DeviceCredentials {
   deviceId: string
   deviceSecret: string
+  deviceName?: string
 }
 
 let credentials: DeviceCredentials | null = loadStoredCredentials()
@@ -273,7 +274,8 @@ class ApiClient {
 
     await this.setDeviceCredentials({
       deviceId: data.deviceId,
-      deviceSecret: data.deviceSecret
+      deviceSecret: data.deviceSecret,
+      deviceName: data.deviceName || payload.clientName
     })
 
     return data

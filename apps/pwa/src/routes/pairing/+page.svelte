@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { apiClient } from '$lib/api/client'
+  import { setDeviceStore } from '$lib/stores/device'
 
   let pairingToken = ''
   let clientName = ''
@@ -37,10 +38,15 @@
     statusMessage = ''
 
     try {
-      await apiClient.startPairing({
+      const pairingData = await apiClient.startPairing({
         pairingToken: pairingToken.trim(),
         clientName: clientName.trim() || defaultName,
         clientDeviceInfo: metadata
+      })
+      setDeviceStore({
+        deviceId: pairingData.deviceId,
+        deviceSecret: pairingData.deviceSecret,
+        deviceName: pairingData.deviceName || clientName.trim() || defaultName
       })
       statusMessage =
         'Pairing successful! Your device is now trusted and can access Navis AI over HTTPS.'

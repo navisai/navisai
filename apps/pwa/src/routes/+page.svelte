@@ -3,6 +3,7 @@
 	import { appStore, daemonStatus, isConnected } from '$lib/stores/app'
 	import { projectsStore, projects, isLoadingProjects, isScanning } from '$lib/stores/projects'
 	import { pendingApprovals } from '$lib/stores/approvals'
+	import { pairedDevice } from '$lib/stores/device'
 
 	let scanPath = ''
 	let scanningPath = ''
@@ -43,6 +44,18 @@
           {/if}
         </div>
       {/if}
+      <div class="mt-2 text-sm">
+        {#if $pairedDevice}
+          <span class="text-sm text-slate-600 mr-2">
+            Paired device:
+            <span class="font-semibold text-navy-700">{$pairedDevice.deviceName || $pairedDevice.deviceId}</span>
+          </span>
+        {:else}
+          <span class="text-sm text-amber-600">
+            No trusted device yet. Visit <a href="/pairing" class="underline">Pairing</a> to register one.
+          </span>
+        {/if}
+      </div>
     </div>
 
     <!-- System Status Dashboard -->
