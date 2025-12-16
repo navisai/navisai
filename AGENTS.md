@@ -1,9 +1,11 @@
 # Local AGENTS.md — NavisAI Project Protocol
 
-Use this file **together with Global @AGENTS.md**.  
+Use this file **together with Global @AGENTS.md**.
 This document defines **NavisAI-specific architecture, guardrails, and workflows** that supplement the global agent rules.
 
 If a conflict exists, **this file overrides Global AGENTS.md** for this repository.
+
+**🔗 Task Tracking**: This project uses **Beads** for persistent task tracking and multi-agent coordination. See Section 13 for complete Beads workflow and onboarding instructions. All implementation work must be tracked in Beads issues.
 
 ---
 
@@ -33,10 +35,48 @@ If a conflict exists, **this file overrides Global AGENTS.md** for this reposito
 - Local-first guarantees: `docs/LOCAL_FIRST_GUARANTEES.md`, `docs/SECURITY.md`
 - Beads workflow / multi-agent coordination: `docs/BEADS_WORKFLOW.md`, `docs/BEADS_AGENT_GUIDE.md`
 
+### Verification & Enforcement System
+
+NavisAI enforces architectural compliance through a multi-layered verification system:
+
+**1. Automated Verification Scripts** (`scripts/verify-architecture.mjs`):
+- Enforces top-level directory structure (only apps/, packages/, docs/, scripts/)
+- Validates all required documentation exists
+- Checks PWA uses canonical origin `https://navis.local`
+- **NEW**: Verifies Beads integration documentation and configuration
+
+**2. Git Hooks** (`scripts/install-git-hooks.mjs`):
+- Pre-commit hooks automatically run `pnpm verify`
+- Prevents non-compliant commits from entering the codebase
+- **NEW**: Checks Beads integration status and provides setup guidance
+
+**3. Package.json Pipeline** (`pnpm verify`):
+```bash
+pnpm verify  # Runs complete verification chain:
+# ├── verify:arch      # Architecture compliance
+# ├── verify:npm-layout # Workspace structure
+# ├── format:check      # Code formatting
+# └── @navisai/pwa check # Svelte validation
+```
+
+**4. Manual Verification Commands**:
+```bash
+pnpm verify:arch      # Run architecture checks only
+pnpm format:check     # Check code formatting
+pnpm --filter @navisai/pwa check  # Svelte-specific validation
+```
+
+**5. Enforcement Results**:
+- ✅ Pass: Commit allowed, proceed with work
+- ❌ Fail: Commit blocked, must fix violations first
+
+All agents must run `pnpm verify` before committing. Install persistent hooks with `pnpm hooks:install`.
+
 ### Change Log Discipline (For Every Patch)
 - State which doc(s) you are implementing.
 - If you introduce a new endpoint or event, update `packages/api-contracts` and `docs/IPC_TRANSPORT.md` in the same change.
 - If you touch setup/onboarding UX, re-check alignment with `docs/SETUP.md` and `docs/ONBOARDING_FLOW.md` and update wording to match.
+- **NEW**: Reference Beads issue IDs when applicable (e.g., "Refs: navisai-abc")
 
 
 ## 1. Project Snapshot (NavisAI)
