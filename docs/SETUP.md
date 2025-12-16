@@ -146,3 +146,11 @@ Quick manual smoke test (macOS + iPhone on same Wi‑Fi):
 - remove local certificates (optional, with explicit confirmation)
 
 Reset must never silently delete user data without approval.
+
+### UX Plan (non-terminal, macOS)
+
+For mainstream users, the preferred path is the macOS Setup app described in `MACOS_SETUP_EXPERIENCE.md`:
+
+- **Enable** installs the bridge LaunchDaemon (one-time admin sheet), then opens `https://navis.local/welcome`.
+- **Disable** removes the bridge LaunchDaemon (one-time admin sheet). This does not delete user data.
+- “Reset data…” is separate and requires explicit confirmation if it removes `~/.navis/db.sqlite` or certificates.
