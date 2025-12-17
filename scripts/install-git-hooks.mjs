@@ -35,17 +35,36 @@ set -e
 echo "Running Navis architecture checks..."
 pnpm verify
 
-# Optional Beads verification if bd command is available
+# Mandatory Beads verification if bd command is available
 if command -v bd >/dev/null 2>&1; then
-  echo "Verifying Beads integration..."
+  echo "Verifying Beads integration and documentation compliance..."
   # Check if Beads is properly initialized
   if [ -d ".beads" ]; then
     echo "✅ Beads integration found"
+    # Verify all Beads issues reference governing documentation
+    if ! pnpm beads:verify; then
+      echo ""
+      echo "❌ Beads documentation compliance check failed!"
+      echo "   All Beads issues must reference governing documentation."
+      echo "   Docs are the canonical authority for all work."
+      echo ""
+      echo "   To fix:"
+      echo "   1. Run 'pnpm beads:verify' to see detailed issues"
+      echo "   2. Update Beads issues with proper doc references"
+      echo "   3. Commit again"
+      exit 1
+    fi
+    echo "✅ All Beads issues properly reference documentation"
   else
-    echo "⚠️  Beads not initialized. Run 'pnpm beads:setup' to enable task tracking."
+    echo "❌ Beads not initialized. Run 'pnpm beads:setup' to enable task tracking."
+    echo "   Beads is mandatory for all work in this repository."
+    exit 1
   fi
 else
-  echo "ℹ️  Beads CLI not found. Install Beads for task tracking integration."
+  echo "❌ Beads CLI not found. Install Beads for mandatory task tracking:"
+  echo "   npm install -g beads"
+  echo "   Then run: pnpm beads:setup"
+  exit 1
 fi
 `
 

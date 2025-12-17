@@ -5,9 +5,6 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [sveltekit(), tailwindcss()],
   build: {
-    outDir: 'build'
+    outDir: 'build',
   },
-  kit: {
-    outDir: '.svelte-kit/output'
-  }
 })

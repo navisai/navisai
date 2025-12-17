@@ -101,9 +101,9 @@ function ensureBeadsIntegration() {
 
   const agentsContent = readUtf8(agentsDoc)
 
-  // Check for Section 13 - Beads Task Management Protocol
-  if (!agentsContent.includes('## 13. Beads Task Management Protocol')) {
-    fail('AGENTS.md must include Section 13: Beads Task Management Protocol')
+  // Check for Section 1 - Beads Task Management Protocol
+  if (!agentsContent.includes('## 1. Beads Task Management Protocol')) {
+    fail('AGENTS.md must include Section 1: Beads Task Management Protocol')
   }
 
   // Check for BEADS_WORKFLOW.md reference in Section 0
@@ -121,4 +121,3 @@ function main() {
 }
 
 main()
-

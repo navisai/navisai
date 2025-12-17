@@ -61,3 +61,18 @@ enterprise/
 apps/pwa/.svelte-kit/
 apps/pwa/build/
 apps/pwa/dist/
+
+# Test artifacts and temporary files
+*.test.log
+*.coverage
+*.tmp
+*.temp
+.nyc_output/
+lcov.info
+test-results/
+playwright-report/
+.vscode-test/
+node_modules/.cache/
+
+# Claude Code local settings
+.claude/settings.local.json

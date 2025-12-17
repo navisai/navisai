@@ -45,11 +45,14 @@ bd create "Task" -t task -d "Details"  # Create new issue
 
 **⚠️ CRITICAL**: **DO NOT CODE WITHOUT READING DOCS FIRST**. See Section 0 "Docs Are Canonical".
 
+**🚫 NO TODOs WITHOUT BEADS**: **NEVER** add TODO comments to code without first creating a Beads issue. Beads **IS** your TODO system. TODO comments without corresponding Beads issues will be rejected in commits.
+
 **Before You Implement (Checklist)**:
 - [ ] Read the governing doc(s) from Section 0.4
-- [ ] Created/updated Beads issue with doc references
+- [ ] Created Beads issue with doc references (BEFORE any TODO comments)
 - [ ] Checked `bd ready` for unblocked work
 - [ ] Verified dependencies are properly linked
+- [ ] Reference Beads issue ID instead of TODO comments
 
 ---
 
@@ -173,17 +176,45 @@ bd ready  # See available work
 ### 1.2 Required Workflow Integration
 
 **Before ANY implementation work**:
-1. Create Beads issue with clear description and governing docs referenced
+1. **Create Beads issue FIRST** - BEFORE any TODO comments in code
 2. Mark all dependencies using `bd dep add` (blocks, related, parent-child, discovered-from)
 3. Use required NavisAI labels: components, packages, domains, types
 4. Update status with `bd update <id> --status <state>`
 
+**🚨 TODO vs Beads Rule**:
+- ✅ **Beads issue**: `bd create "Fix auth flow" -t bug -d "Auth failing on mobile"`
+- ❌ **TODO comment**: `// TODO: Fix auth flow` (WITHOUT Beads issue)
+- ✅ **Reference in code**: `// Auth flow fix: Refs navisai-xyz` (AFTER Beads issue created)
+
+**Beads IS your TODO system** - there is no separate TODO tracking. If you think "I should add a TODO here", your first action is `bd create` instead.
+
 **Issue Creation Requirements**:
 - Title format: "Brief action-oriented description"
-- Description MUST reference governing docs (Section 13.3)
+- **Description MUST reference governing docs** - Non-negotiable requirement
+  - Use format: `docs/NETWORKING.md v0.3` (include version)
+  - Reference multiple docs when applicable: `docs/NETWORKING.md`, `docs/SECURITY.md`
+  - Domain mapping enforced by verification script
 - Priority (0-4, 0=highest): P0 for critical, P1 for important, P2 for normal, P3+ for low
 - Type: `feature`, `bug`, `task`, `epic`, `chore`
 - Labels: At least one component/domain label per `docs/BEADS_WORKFLOW.md`
+
+**📚 Documentation Authority Rule**:
+**Docs are the canonical authority - no exceptions**. If a feature isn't documented, the issue must include:
+1. Which existing doc governs this work
+2. OR a plan to update/create the necessary documentation first
+3. Reference to the specific section or requirement being implemented
+
+**Example Issue Description**:
+```
+Implement mDNS service advertisement for LAN discovery
+
+📋 Governing Documentation:
+- docs/NETWORKING.md v0.3 - Section 4.2 "mDNS Service Advertisement"
+- docs/SECURITY.md v0.2 - Section 2.1 "LAN Name Security"
+
+This implements the Bonjour/mDNS service discovery requirements
+defined in NETWORKING.md v0.3.
+```
 
 **Session Management**:
 - Run `bd quickstart` at session start to load project context
@@ -286,6 +317,8 @@ bd create "Update bridge to require admin privileges" \
 - ❌ Not running `bd quickstart` at session start
 - ❌ Using generic labels instead of required components/domains
 - ❌ Implementing before checking `bd ready`
+- 🚫 **CRITICAL**: ❌ Adding TODO comments without first creating a Beads issue
+- 🚫 **CRITICAL**: ❌ Using TODO/FIXME comments without Beads issue references
 
 **Visual Workflow**:
 ```
@@ -735,9 +768,14 @@ find . -name "coverage" -type d -mtime +7 -exec rm -rf {} +
 ### 14.1 Automated Verification Cadence
 **Daily Checks**:
 - Run `pnpm verify` to ensure all builds pass
-- Check for new TODO/FIXME comments without Beads links
+- **Check for ANY TODO/FIXME comments without Beads links** - ALL must reference a Beads issue ID
 - Verify all endpoints have corresponding tests
 - Scan for orphaned documentation (docs for non-existent features)
+
+**🚨 TODO Enforcement**:
+- ANY TODO comment MUST include a Doc-based Beads issue reference: `// TODO: Fix auth (Refs: navisai-abc)`
+- TODO comments without Beads references will block commits
+- If you find a TODO without a Beads reference, create the Beads issue immediately OR remove the comment
 
 **Weekly Deep Verification**:
 - Cross-reference `docs/` with implementation:

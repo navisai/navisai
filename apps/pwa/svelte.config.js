@@ -6,7 +6,7 @@ const config = {
     adapter: adapter({
       fallback: 'index.html',
       precompress: false,
-      strict: true
+      strict: true,
     }),
   },
 }
