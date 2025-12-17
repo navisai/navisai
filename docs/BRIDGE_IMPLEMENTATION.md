@@ -1,8 +1,10 @@
 # Navis AI Bridge Implementation Plan
-Version: v0.2 (Intelligent Reverse Proxy)
-Status: Implementation Specification
+⚠️ **DEPRECATED** - This document describes the reverse proxy approach that has been replaced by OS-level packet forwarding. See `NETWORKING.md` v0.3 for the current implementation.
 
-This document specifies the implementation of the Navis Bridge as an intelligent reverse proxy that can handle port 443 conflicts gracefully.
+Version: v0.2 (Intelligent Reverse Proxy)
+Status: DEPRECATED - Replaced by packet forwarding (see apps/daemon/src/bridge-packet.js)
+
+This document specified the implementation of the Navis Bridge as an intelligent reverse proxy. The approach has been superseded by domain-based packet forwarding which provides better performance and no TLS termination overhead.
 
 ---
 

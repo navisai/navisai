@@ -50,7 +50,7 @@ apps/
     daemon/       # local backend
     cli/          # navisai CLI
     pwa/          # SvelteKit + vite-pwa PWA
-    setup-app/    # Apple-like setup helper that installs the Navis Bridge
+    setup-app/    # Apple-like setup helper that installs packet forwarding rules
 
 packages/
     core/         # types, state machines, helpers
@@ -78,13 +78,13 @@ Navis targets a single Apple-like LAN origin:
 
 `https://navis.local` (no port)
 
-Run the one-time setup to install the Navis Bridge (443 → daemon port 47621), enable mDNS, and generate the certificate so `https://navis.local` works without needing `sudo` again:
+Run the one-time setup to install packet forwarding rules (443 → daemon port 47621), enable mDNS, and generate the certificate so `https://navis.local` works without needing `sudo` again:
 
 ```
 navisai setup
 ```
 
-`navisai setup` launches the GUI-ready helper (`apps/setup-app` / `@navisai/setup-app`) so mainstream macOS users see a friendly dialog and only approve the bridge once. After setup, `navisai up` starts an unprivileged daemon that is reachable at `https://navis.local/welcome`.
+`navisai setup` launches the GUI-ready helper (`apps/setup-app` / `@navisai/setup-app`) so mainstream macOS users see a friendly dialog and only approve the packet forwarding setup once. After setup, `navisai up` starts an unprivileged daemon that is reachable at `https://navis.local/welcome`.
 
 ### 2. Start Navis
 

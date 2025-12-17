@@ -27,14 +27,14 @@ navisai setup
 
 Setup responsibilities (explicit user consent; may require admin privileges):
 
-1. Enable the Navis Bridge (TCP 443 → daemon port 47621).
+1. Install **packet forwarding rules** that selectively route navis.local traffic (443 → daemon port 47621).
 2. Enable mDNS/Bonjour so `navis.local` resolves on the LAN to the host machine’s LAN IP.
 3. Generate/refresh local certificates for `navis.local` (used by the daemon).
 4. Provide guided steps for mobile trust (iOS requires an explicit trust action for local certificates).
 
 Setup is never silent and is fully reversible.
 
-The `navisai setup` command launches the platform helper (`apps/setup-app` / `@navisai/setup-app`) so installing the Navis Bridge (443 → 47621) and enabling mDNS is bundled with a friendly approval dialog before the canonical `https://navis.local` origin becomes available.
+The `navisai setup` command launches the platform helper (`apps/setup-app` / `@navisai/setup-app`) so installing packet forwarding rules (443 → 47621) and enabling mDNS is bundled with a friendly approval dialog before the canonical `https://navis.local` origin becomes available.
 
 Preferred macOS UX:
 - Users complete this “machine setup” via a signed installer or setup app (see `MACOS_SETUP_EXPERIENCE.md`).
