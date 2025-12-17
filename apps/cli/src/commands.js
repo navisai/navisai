@@ -182,6 +182,7 @@ async function installMacOSBridge() {
     <array>
       <string>${nodePath}</string>
       <string>${bridgeEntrypoint}</string>
+      <string>start</string>
     </array>
 
     <key>EnvironmentVariables</key>
@@ -211,9 +212,53 @@ async function installMacOSBridge() {
 
   await fs.writeFile(localPlist, plist, 'utf8')
 
+  // Create pf.conf with navisai anchors
+  const pfConf = `#
+# Default PF configuration file with NavisAI support
+#
+# This file contains the main ruleset, which gets automatically loaded
+# at startup.  PF will not be automatically enabled, however.  Instead,
+# each component which utilizes PF is responsible for enabling and disabling
+# PF via -E and -X as documented in pfctl(8).  That will ensure that PF
+# is disabled only when the last enable reference is released.
+#
+# Care must be taken to ensure that the main ruleset does not get flushed,
+# as the nested anchors rely on the anchor point defined here. In addition,
+# to the anchors loaded by this file, some system services would dynamically
+# insert anchors into the main ruleset. These anchors will be added only when
+# the system service is used and would removed on termination of the service.
+#
+# See pf.conf(5) for syntax.
+#
+
+#
+# com.apple anchor point
+#
+scrub-anchor "com.apple/*"
+nat-anchor "com.apple/*"
+rdr-anchor "com.apple/*"
+rdr-anchor "navisai/*"
+dummynet-anchor "com.apple/*"
+anchor "com.apple/*"
+anchor "navisai/*"
+load anchor "com.apple" from "/etc/pf.anchors/com.apple"
+`
+
+  const localPfConf = path.join(localDir, 'pf.conf')
+  const systemPfConf = '/etc/pf.conf'
+  const systemPfConfBackup = '/etc/pf.conf.backup'
+
+  await fs.writeFile(localPfConf, pfConf, 'utf8')
+
   const shellCommand = [
     'set -euo pipefail',
+    // Install plist
     `install -m 0644 "${localPlist}" "${systemPlist}"`,
+    // Backup existing pf.conf if it exists and hasn't been backed up
+    `if [ -f "${systemPfConf}" ] && [ ! -f "${systemPfConfBackup}" ]; then cp "${systemPfConf}" "${systemPfConfBackup}"; fi`,
+    // Install updated pf.conf if it doesn't have navisai anchors
+    `if ! grep -q "rdr-anchor \\"navisai/\\"" "${systemPfConf}" 2>/dev/null; then install -m 0644 "${localPfConf}" "${systemPfConf}"; fi`,
+    // Load the service
     `launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true`,
     `launchctl bootstrap system "${systemPlist}"`,
     `launchctl enable system/com.navisai.bridge >/dev/null 2>&1 || true`,
@@ -225,10 +270,14 @@ async function installMacOSBridge() {
 
 async function uninstallMacOSBridge() {
   const systemPlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
+  const systemPfConf = '/etc/pf.conf'
+  const systemPfConfBackup = '/etc/pf.conf.backup'
   const shellCommand = [
     'set -euo pipefail',
     `launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true`,
     `rm -f "${systemPlist}"`,
+    // Restore original pf.conf if backup exists
+    `if [ -f "${systemPfConfBackup}" ]; then mv "${systemPfConfBackup}" "${systemPfConf}"; fi`,
   ].join('; ')
 
   await runMacOSAdminShell(shellCommand)
