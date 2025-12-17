@@ -20,6 +20,7 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { platform, networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import multicastDns from 'multicast-dns'
+import { TransparentHTTPSProxy } from './transparent-proxy.js'
 
 const listenPort = 443
 const targetHost = '127.0.0.1'
@@ -32,6 +33,11 @@ class PacketForwardingBridge {
     this.isRunning = false
     this.cleanupCommands = []
     this.mdns = null
+    this.transparentProxy = new TransparentHTTPSProxy({
+      proxyPort: 8443,
+      daemonHost: targetHost,
+      daemonPort: targetPort
+    })
   }
 
   async start() {
@@ -39,10 +45,14 @@ class PacketForwardingBridge {
       console.log(`🚀 Starting Navis Packet Forwarding Bridge...`)
       console.log(`Platform: ${this.platform}`)
       console.log(`Domain: ${targetDomain}`)
-      console.log(`Forwarding: port ${listenPort} → ${targetHost}:${targetPort}`)
+      console.log(`Using transparent HTTPS proxy for domain-based routing`)
 
       // Enable packet forwarding in kernel if needed
       await this.enablePacketForwarding()
+
+      // Start transparent HTTPS proxy for domain-based routing
+      console.log('🔧 Starting transparent HTTPS proxy...')
+      await this.transparentProxy.start()
 
       // Install platform-specific forwarding rules
       switch (this.platform) {
@@ -62,7 +72,7 @@ class PacketForwardingBridge {
       this.isRunning = true
       console.log('✅ Packet forwarding rules installed successfully')
       console.log(`🌐 Navis is now accessible at: https://${targetDomain}`)
-      console.log('💡 Note: Other services can continue using port 443')
+      console.log('💡 Other HTTPS services can coexist on port 443')
 
       // Start mDNS service for name resolution
       await this.startMDNS()
@@ -189,11 +199,13 @@ class PacketForwardingBridge {
 
   async setupMacOS() {
     // macOS uses pfctl for packet filtering and redirection
+    // Redirect port 443 to transparent proxy which handles domain-based routing
     const anchorName = 'navis'
+    const proxyPort = this.transparentProxy.options.proxyPort
     const pfConf = `
 # Navis packet forwarding rules
-# Redirect ALL HTTPS traffic to Navis daemon (macOS pf limitation)
-rdr pass inet proto tcp from any to any port 443 -> ${targetHost} port ${targetPort}
+# Redirect HTTPS traffic to transparent proxy for domain-based routing
+rdr pass inet proto tcp from any to any port 443 -> 127.0.0.1 port ${proxyPort}
 
 # Allow forwarded packets
 pass out quick inet proto tcp from any to any keep state
@@ -222,8 +234,7 @@ pass in quick inet proto tcp from any to any keep state
       this.cleanupCommands.push(`sudo pfctl -a ${anchorName} -F all`)
       this.cleanupCommands.push(`rm -f ${tempFile}`)
 
-      console.log('✅ macOS pfctl rules installed')
-      console.log('⚠️  Note: macOS pf forwards ALL port 443 traffic (not domain-specific)')
+      console.log('✅ macOS pfctl rules installed (redirecting to transparent proxy)')
     } catch (error) {
       throw new Error(`Failed to setup macOS packet forwarding: ${error.message}`)
     }
@@ -283,6 +294,11 @@ pass in quick inet proto tcp from any to any keep state
 
   async cleanup() {
     console.log('\n🧹 Cleaning up packet forwarding rules...')
+
+    // Stop transparent proxy
+    if (this.transparentProxy) {
+      await this.transparentProxy.stop()
+    }
 
     for (const command of this.cleanupCommands.reverse()) {
       try {
