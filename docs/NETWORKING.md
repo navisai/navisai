@@ -126,10 +126,13 @@ Since packet forwarding operates at the network layer:
 # Enable forwarding
 sudo sysctl -w net.inet.ip.forwarding=1
 
-# NOTE: pfctl has limitations for Host header inspection in rdr rules
-# The simple rule below forwards ALL port 443 traffic, not just navis.local
-# Proper domain-based forwarding requires advanced pf techniques (see navisai-a1p)
-echo "rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port 47621" | sudo pfctl -a navis -f -
+# Domain-based forwarding with transparent HTTPS proxy
+# Redirects port 443 to transparent proxy (port 8443)
+echo "rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port 8443" | sudo pfctl -a navisai/proxy -f -
+
+# The transparent proxy inspects TLS SNI and routes:
+# - navis.local → 127.0.0.1:47621 (NavisAI daemon)
+# - other domains → original destinations
 ```
 
 **Linux**:
@@ -144,8 +147,8 @@ sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -m string --string "Host: 
 netsh interface portproxy add v4tov4 listenport=443 listenaddress=0.0.0.0 connectport=47621 connectaddress=127.0.0.1
 ```
 
-**Important Implementation Notes**:
-- **macOS pf limitations**: pf's rdr rules cannot inspect Host headers natively, making true domain-based forwarding challenging. The current implementation forwards all port 443 traffic. See issue [navisai-a1p] for implementing proper domain-based forwarding using advanced pf techniques or transparent proxying.
+**Implementation Status**:
+- **macOS**: ✅ Solved with transparent HTTPS proxy (see navisai-a1p). The proxy inspects TLS SNI to achieve true domain-based forwarding without conflicts.
 - **Linux**: Properly implements domain-based forwarding using string matching on the Host header.
 - **Windows**: netsh portproxy cannot filter by domain and forwards all port 443 traffic - this is a known Windows limitation.
 

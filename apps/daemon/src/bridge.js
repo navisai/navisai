@@ -237,8 +237,8 @@ pass in quick inet proto tcp from any to any keep state
       try {
         execSync('sudo pfctl -e', { stdio: 'pipe' })
       } catch (error) {
-        // pfctl -e fails if pf is already enabled, which is fine
-        if (!error.message.includes('already enabled')) {
+        // pfctl -e fails if pf is already enabled or with certain return codes, which is fine
+        if (!error.message.includes('already enabled') && error.status !== 1) {
           throw error
         }
       }

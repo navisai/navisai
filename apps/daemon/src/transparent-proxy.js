@@ -96,23 +96,23 @@ export class TransparentHTTPSProxy {
    * Create pfctl rules for redirecting port 443 to our proxy
    */
   async createPfRules() {
-    const rules = [
-      `rdr pass inet proto tcp from any to any port 443 -> 127.0.0.1 port ${this.options.proxyPort}`,
+    const natRules = [
+      `rdr pass inet proto tcp from any to any port 443 -> 127.0.0.1 port ${this.options.proxyPort}`
+    ]
+
+    const filterRules = [
       `pass out quick inet proto tcp from any to any port 443 keep state`
     ]
 
-    const pfConfig = rules.join('\n')
+    const natConfig = natRules.join('\n')
+    const filterConfig = filterRules.join('\n')
 
     try {
-      // Create temporary anchor file
-      const tmpFile = '/tmp/navisai-proxy-rules.txt'
-      await this.writeFile(tmpFile, pfConfig)
+      // Load NAT rules into navisai/proxy anchor
+      await this.execCommand(`echo '${natConfig}' | sudo pfctl -a navisai/proxy -f -`)
 
-      // Load rules into pf
-      await this.execCommand(`sudo pfctl -a navisai/proxy -f ${tmpFile}`)
-
-      // Clean up temp file
-      await this.execCommand(`rm ${tmpFile}`)
+      // Load filter rules into navisai/filter anchor
+      await this.execCommand(`echo '${filterConfig}' | sudo pfctl -a navisai/filter -f -`)
 
       logger.info('pf rules loaded for transparent proxy')
     } catch (error) {
@@ -126,7 +126,12 @@ export class TransparentHTTPSProxy {
    */
   async removePfRules() {
     try {
-      await this.execCommand('sudo pfctl -a navisai/proxy -F rules')
+      // Remove NAT rules
+      await this.execCommand('sudo pfctl -a navisai/proxy -F nat 2>/dev/null || true')
+
+      // Remove filter rules
+      await this.execCommand('sudo pfctl -a navisai/filter -F rules 2>/dev/null || true')
+
       logger.info('pf rules removed for transparent proxy')
     } catch (error) {
       logger.warn('Failed to remove pf rules:', error)
@@ -412,15 +417,24 @@ export class TransparentHTTPSProxy {
    */
   execCommand(command) {
     return new Promise((resolve, reject) => {
-      spawn(command, [], { shell: true, stdio: 'pipe' })
-        .on('close', (code) => {
-          if (code === 0) {
-            resolve()
-          } else {
-            reject(new Error(`Command failed with exit code ${code}: ${command}`))
-          }
-        })
-        .on('error', reject)
+      const child = spawn(command, [], { shell: true, stdio: ['pipe', 'pipe', 'pipe'] })
+      let stderr = ''
+
+      child.stderr?.on('data', (data) => {
+        stderr += data.toString()
+      })
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          resolve()
+        } else if (command.includes('pfctl -e') && stderr.includes('already enabled')) {
+          // pfctl -e returns 1 when pf is already enabled, which is fine
+          resolve()
+        } else {
+          reject(new Error(`Command failed with exit code ${code}: ${command}`))
+        }
+      })
+      child.on('error', reject)
     })
   }
 
