@@ -13,13 +13,27 @@ import {
  */
 export function createAuthMiddleware(dbManager) {
   return async function authMiddleware(request, reply) {
+    // Public paths that don't require authentication
+    const publicPaths = [
+      '/status',
+      '/welcome',
+      '/pairing',
+      '/certs',
+      '/logs/stream'  // Log streaming is public for CLI access
+    ]
+
+    // Skip auth for public paths
+    if (publicPaths.some(path => request.url.startsWith(path))) {
+      return
+    }
+
     const protectedPrefixes = [
       '/projects',
       '/sessions',
       '/approvals',
       '/devices',
       '/discovery',
-      '/logs',
+      '/logs',  // Protect other log endpoints like /logs (for recent logs)
     ]
 
     if (!protectedPrefixes.some(prefix => request.url.startsWith(prefix))) {
