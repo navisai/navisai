@@ -9,6 +9,31 @@ If a conflict exists, **this file overrides Global AGENTS.md** for this reposito
 
 ---
 
+## 📌 Project Snapshot (5-Min Overview)
+
+**NavisAI** is a **local-first AI control plane** that helps developers manage and monitor their projects through a single, clean LAN URL.
+
+### Core Components
+- **Daemon**: Unprivileged backend serving HTTPS + WSS at `https://navis.local`
+- **CLI**: `navisai` command for control and automation
+- **PWA**: Mobile-first web UI served by daemon
+- **Packet Forwarding**: OS-level routing (not reverse proxy)
+
+### Current Architecture Status
+- ✅ **Packet forwarding bridge** implemented (macOS pfctl, Linux iptables, Windows netsh)
+- ❌ **mDNS/Bonjour** - NOT IMPLEMENTED (critical blocker for LAN access)
+- ✅ **PWA** built and serving at root path
+- ✅ **HTTPS certificate** generation and management
+- ⚠️ **CLI logs** - shows "not implemented"
+- ⚠️ **Doctor diagnostics** - checks old bridge, not packet forwarding
+
+### Critical Path
+1. **Implement mDNS service advertisement** (navisai-d0n) - BLOCKING
+2. Update CLI doctor for packet forwarding (navisai-jsh)
+3. Implement CLI log streaming (navisai-jma)
+
+---
+
 ## 🚀 Agent Quick Start (First 3 Commands)
 
 ```bash
@@ -67,7 +92,7 @@ NavisAI enforces architectural compliance through a multi-layered verification s
 **2. Git Hooks** (`scripts/install-git-hooks.mjs`):
 - Pre-commit hooks automatically run `pnpm verify`
 - Prevents non-compliant commits from entering the codebase
-- **NEW**: Checks Beads integration status and provides setup guidance
+- Checks Beads integration status and provides setup guidance
 
 **3. Package.json Pipeline** (`pnpm verify`):
 ```bash
@@ -95,7 +120,7 @@ All agents must run `pnpm verify` before committing. Install persistent hooks wi
 - State which doc(s) you are implementing.
 - If you introduce a new endpoint or event, update `packages/api-contracts` and `docs/IPC_TRANSPORT.md` in the same change.
 - If you touch setup/onboarding UX, re-check alignment with `docs/SETUP.md` and `docs/ONBOARDING_FLOW.md` and update wording to match.
-- **NEW**: Reference Beads issue IDs when applicable (e.g., "Refs: navisai-abc")
+- ALWAYS Reference Beads issue IDs (e.g., "Refs: navisai-abc")
 
 
 ## 1. Beads Task Management Protocol
@@ -279,6 +304,61 @@ Beads integration is enforced through:
 - Verification: `scripts/verify-architecture.mjs`
 - Tool integration: `package.json` scripts
 - Git hooks: Pre-commit enforcement
+
+---
+
+## 🔍 Key Files & Where to Find Them
+
+### Core Implementation
+- `apps/daemon/src/bridge-packet.js` - Packet forwarding implementation
+- `apps/daemon/daemon.js` - Main daemon server
+- `apps/cli/src/commands.js` - CLI command implementations
+- `apps/pwa/src/lib/api/client.ts` - PWA API client
+
+### Critical Docs (Read First!)
+- `docs/NETWORKING.md` - **CANONICAL** for packet forwarding model
+- `docs/SETUP.md` - Installation and setup flow
+- `docs/SECURITY.md` - Security model and considerations
+- `docs/ONBOARDING_FLOW.md` - User onboarding process
+
+### CLI Reference
+- `./navisai up` - Start daemon
+- `./navisai setup` - One-time setup (admin required)
+- `./navisai doctor` - Diagnostics
+- `./navisai logs` - View logs (not implemented yet)
+
+### Current Gotchas & Known Issues
+1. **mDNS not implemented** - navis.local won't resolve without it
+2. **Doctor checks old bridge** - Needs packet forwarding diagnostics
+3. **Packet forwarding cleanup** - Test `./navisai cleanup` works properly
+4. **Windows limitations** - netsh forwards ALL port 443 traffic (not domain-specific)
+
+## 🔄 Common Workflows
+
+### Adding a New Feature
+1. Read relevant docs (NETWORKING.md, IPC_TRANSPORT.md)
+2. Create Beads issue: `bd create "Feature" -t feature -d "Description"`
+3. Implement in appropriate app (daemon/, cli/, pwa/)
+4. Run tests: `pnpm verify`
+5. Commit with docs reference
+
+### Fixing a Bug
+1. Create Beads issue: `bd create "Bug" -t bug -d "Description"`
+2. Add reproduction steps
+3. Fix with minimal change
+4. Test fix works
+5. Update docs if needed
+
+### Updating Documentation
+1. Always update doc first, then code
+2. Reference changed sections in commit
+3. Run `pnpm format` and `pnpm verify`
+4. No doc sweeps without explicit approval
+
+### Working with Packet Forwarding
+1. Test with `sudo ./apps/daemon/src/bridge-packet.js`
+2. Cleanup with `./navisai cleanup --bridge-only`
+3. Verify rules: `sudo pfctl -a navisai -s rules` (macOS)
 
 ---
 
@@ -507,6 +587,33 @@ Logs are part of the UX for a local control plane.
    - Update relevant docs if behavior or architecture changes
 
 ---
+
+## 10. Quick Verification Tests
+
+Before committing changes, run these essential checks:
+
+```bash
+# 1. Build passes
+pnpm install
+pnpm --filter @navisai/pwa build
+pnpm verify
+
+# 2. Daemon starts
+./navisai up &
+DAEMON_PID=$!
+sleep 2
+curl -k https://navis.local/status
+kill $DAEMON_PID
+
+# 3. Packet forwarding (if implemented)
+sudo ./apps/daemon/src/bridge-packet.js &
+# Test navis.local routing
+# Kill with Ctrl+C
+
+# 4. CLI basics work
+./navisai doctor
+./navisai status
+```
 
 ## 11. Local Verification Checklist
 
