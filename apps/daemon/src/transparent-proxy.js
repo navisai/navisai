@@ -11,8 +11,12 @@
 
 import { createConnection, createServer } from 'node:net'
 import { spawn } from 'node:child_process'
+import { createServer as createHttpsServer } from 'node:https'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { logger } from '@navisai/logging'
 import { DevServerDetector } from './dev-server-detector.js'
+import { CertificateManager } from './certificate-manager.js'
 
 export class TransparentHTTPSProxy {
   constructor(options = {}) {
@@ -28,6 +32,8 @@ export class TransparentHTTPSProxy {
     this.isRunning = false
     this.connections = new Set()
     this.devServerDetector = null
+    this.certificateManager = null
+    this.httpsServers = new Map()
   }
 
   /**
@@ -149,6 +155,14 @@ export class TransparentHTTPSProxy {
       // Load pf rules to redirect port 443
       await this.createPfRules()
 
+      // Initialize certificate manager
+      this.certificateManager = new CertificateManager({
+        dataDir: join(homedir(), '.navis'),
+        validityDays: 90
+      })
+      await this.certificateManager.initialize()
+      logger.info('Certificate manager initialized')
+
       // Initialize dev server detector if enabled
       if (this.options.enableDevServerDetection) {
         this.devServerDetector = new DevServerDetector({
@@ -203,11 +217,22 @@ export class TransparentHTTPSProxy {
     // Buffer to capture first packet for SNI extraction
     let firstPacket = null
     let targetSocket = null
+    let httpsServer = null
 
     clientSocket.on('data', async (data) => {
       if (!firstPacket) {
         firstPacket = data
         const sni = this.extractSNI(data)
+
+        if (!sni) {
+          // No SNI found, close connection
+          logger.warn('No SNI found in TLS handshake')
+          clientSocket.destroy()
+          return
+        }
+
+        // Get or create certificate for this domain
+        const certBundle = await this.certificateManager.generateCertificate(sni)
 
         if (sni === 'navis.local') {
           // Route to NavisAI daemon
