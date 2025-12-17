@@ -12,6 +12,7 @@
 import { createConnection, createServer } from 'node:net'
 import { spawn } from 'node:child_process'
 import { logger } from '@navisai/logging'
+import { DevServerDetector } from './dev-server-detector.js'
 
 export class TransparentHTTPSProxy {
   constructor(options = {}) {
@@ -19,12 +20,14 @@ export class TransparentHTTPSProxy {
       proxyPort: options.proxyPort || 8443,
       daemonHost: options.daemonHost || '127.0.0.1',
       daemonPort: options.daemonPort || 47621,
+      enableDevServerDetection: options.enableDevServerDetection !== false,
       ...options
     }
 
     this.server = null
     this.isRunning = false
     this.connections = new Set()
+    this.devServerDetector = null
   }
 
   /**
@@ -146,6 +149,27 @@ export class TransparentHTTPSProxy {
       // Load pf rules to redirect port 443
       await this.createPfRules()
 
+      // Initialize dev server detector if enabled
+      if (this.options.enableDevServerDetection) {
+        this.devServerDetector = new DevServerDetector({
+          scanInterval: 5000,
+          workspacePaths: [process.cwd()],
+          autoMapDomains: true
+        })
+
+        // Listen for domain mapping events
+        this.devServerDetector.on('domainMapped', ({ domain, port }) => {
+          logger.info(`Auto-mapped domain: ${domain} -> localhost:${port}`)
+        })
+
+        this.devServerDetector.on('domainUnmapped', ({ domain }) => {
+          logger.info(`Unmapped domain: ${domain}`)
+        })
+
+        // Start detection
+        await this.devServerDetector.start()
+      }
+
       // Create proxy server
       this.server = createServer((clientSocket) => {
         this.handleConnection(clientSocket)
@@ -193,16 +217,48 @@ export class TransparentHTTPSProxy {
             port: this.options.daemonPort
           })
         } else if (sni) {
-          // Route to original destination (resolve the hostname)
-          logger.debug(`Routing ${sni} to original destination`)
+          // Check for dev server mappings first
+          if (this.devServerDetector) {
+            const domainMappings = this.devServerDetector.getDomainMappings()
+            const mappedPort = domainMappings.get(sni)
 
-          // For now, we'll forward to the actual IP
-          // In a full implementation, we'd resolve the hostname
-          // and forward to port 443 of the original destination
-          targetSocket = createConnection({
-            host: sni,
-            port: 443
-          })
+            if (mappedPort) {
+              // Route to mapped dev server
+              logger.debug(`Routing ${sni} to localhost:${mappedPort}`)
+              targetSocket = createConnection({
+                host: '127.0.0.1',
+                port: mappedPort
+              })
+            } else if (sni.endsWith('.localhost') || sni.endsWith('.local')) {
+              // Local domain but not mapped - try to detect the server
+              const port = await this.tryDetectServerForDomain(sni)
+              if (port) {
+                logger.debug(`Routing ${sni} to detected localhost:${port}`)
+                targetSocket = createConnection({
+                  host: '127.0.0.1',
+                  port
+                })
+              } else {
+                logger.warn(`Unknown local domain: ${sni}`)
+                clientSocket.destroy()
+                return
+              }
+            } else {
+              // External domain - route normally
+              logger.debug(`Routing ${sni} to external destination`)
+              targetSocket = createConnection({
+                host: sni,
+                port: 443
+              })
+            }
+          } else {
+            // No dev server detector - route to original destination
+            logger.debug(`Routing ${sni} to original destination`)
+            targetSocket = createConnection({
+              host: sni,
+              port: 443
+            })
+          }
         } else {
           // No SNI found, close connection
           logger.warn('No SNI found in TLS handshake')
@@ -265,6 +321,31 @@ export class TransparentHTTPSProxy {
   }
 
   /**
+   * Try to detect a server for a specific domain
+   */
+  async tryDetectServerForDomain(domain) {
+    // Extract project name from domain (e.g., myapp.localhost -> myapp)
+    const projectName = domain.replace(/\.(localhost|local)$/, '')
+
+    // Check if we have any active servers that might match
+    if (this.devServerDetector) {
+      const activeServers = this.devServerDetector.getActiveServers()
+
+      // Simple heuristic: return the first server that might match
+      for (const [port, serverInfo] of activeServers) {
+        // Check if server info contains project name
+        if (serverInfo.processes.some(p =>
+          p.details.toLowerCase().includes(projectName.toLowerCase())
+        )) {
+          return port
+        }
+      }
+    }
+
+    return null
+  }
+
+  /**
    * Stop the transparent proxy
    */
   async stop() {
@@ -281,6 +362,12 @@ export class TransparentHTTPSProxy {
       }
     }
     this.connections.clear()
+
+    // Stop dev server detector
+    if (this.devServerDetector) {
+      await this.devServerDetector.stop()
+      this.devServerDetector = null
+    }
 
     // Close server
     if (this.server) {
@@ -310,6 +397,20 @@ export class TransparentHTTPSProxy {
         })
         .on('error', reject)
     })
+  }
+
+  /**
+   * Get current domain mappings
+   */
+  getDomainMappings() {
+    return this.devServerDetector ? this.devServerDetector.getDomainMappings() : new Map()
+  }
+
+  /**
+   * Get active servers
+   */
+  getActiveServers() {
+    return this.devServerDetector ? this.devServerDetector.getActiveServers() : new Map()
   }
 
   /**

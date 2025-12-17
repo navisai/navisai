@@ -74,6 +74,19 @@ class PacketForwardingBridge {
       console.log(`🌐 Navis is now accessible at: https://${targetDomain}`)
       console.log('💡 Other HTTPS services can coexist on port 443')
 
+      // Show dev server mappings
+      if (this.transparentProxy) {
+        setTimeout(async () => {
+          const mappings = this.transparentProxy.getDomainMappings()
+          if (mappings.size > 0) {
+            console.log('\n🔗 Auto-detected dev servers:')
+            for (const [domain, port] of mappings) {
+              console.log(`   https://${domain} → localhost:${port}`)
+            }
+          }
+        }, 2000) // Wait a moment for detection
+      }
+
       // Start mDNS service for name resolution
       await this.startMDNS()
 
