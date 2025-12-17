@@ -554,11 +554,30 @@ export async function doctorCommand() {
     allGood = false
   }
 
-  // Check if daemon entrypoint can be resolved
+  // Check if daemon entrypoint can be resolved and is valid
   const daemonPath = resolveDaemonEntrypoint()
   try {
     await fs.access(daemonPath)
-    console.log('✅ Daemon binary found')
+    console.log('✅ Daemon binary found:', daemonPath)
+
+    // Check daemon syntax for both entrypoint and daemon.js
+    const syntaxChecks = [
+      { file: daemonPath, name: 'Daemon entrypoint' },
+      { file: daemonPath.replace('/src/index.js', '/daemon.js'), name: 'Daemon class' }
+    ]
+
+    for (const check of syntaxChecks) {
+      try {
+        await execAsync(`node -c "${check.file}" 2>&1`)
+        console.log(`✅ ${check.name} syntax is valid`)
+      } catch (error) {
+        console.log(`❌ ${check.name} has syntax errors:`)
+        error.stdout.split('\n').filter(line => line.trim()).forEach(line => {
+          console.log(`   ${line}`)
+        })
+        allGood = false
+      }
+    }
   } catch {
     console.log('❌ Daemon binary not found at:', daemonPath)
     allGood = false
@@ -616,6 +635,246 @@ export async function doctorCommand() {
     allGood = false
   }
 
+  // Check daemon process status
+  const daemonProcess = await findDaemonProcess()
+  if (daemonProcess) {
+    console.log(`✅ Daemon process running (PID: ${daemonProcess.pid})`)
+
+    // Check daemon logs for errors
+    const errLog = '/Volumes/Macintosh HD/Users/vsmith/.navis/logs/daemon.err.log'
+    try {
+      const { stdout: recentErrors } = await execAsync(`tail -5 "${errLog}" 2>/dev/null | grep -v "No ALTQ" || echo "no recent errors"`)
+      if (recentErrors && !recentErrors.includes('no recent errors')) {
+        console.log('⚠️  Recent daemon errors detected:')
+        recentErrors.split('\n').filter(line => line.trim()).forEach(line => {
+          console.log(`   ${line}`)
+        })
+        allGood = false
+      }
+    } catch (e) {
+      // Ignore log check errors
+    }
+  } else {
+    console.log('⚠️  Daemon process not running')
+    console.log('   Try: navisai up')
+    allGood = false
+  }
+
+  // Check database dependencies
+  console.log('\n📊 Database Dependencies:')
+  try {
+    // Check if better-sqlite3 native bindings are available
+    const dbPath = '/Volumes/Macintosh HD/Users/vsmith/navisai/node_modules/.pnpm/better-sqlite3@9.6.0/node_modules/better-sqlite3/build/better_sqlite3.node'
+    try {
+      await fs.access(dbPath)
+      console.log('✅ Native SQLite bindings found')
+    } catch {
+      console.log('⚠️  Native SQLite bindings not found (optional per architecture)')
+      console.log('   Daemon will run without persistent storage')
+    }
+  } catch (e) {
+    console.log('⚠️  Could not check database dependencies')
+  }
+
+  // Check log directory
+  const logDir = '/Volumes/Macintosh HD/Users/vsmith/.navis/logs'
+  try {
+    await fs.access(logDir)
+    console.log('✅ Log directory exists:', logDir)
+  } catch {
+    console.log('⚠️  Log directory not found, will be created')
+  }
+
+  // Check data directory
+  const dataDir = '/Volumes/Macintosh HD/Users/vsmith/.navis'
+  try {
+    await fs.access(dataDir)
+    console.log('✅ Data directory exists:', dataDir)
+  } catch {
+    console.log('⚠️  Data directory not found, will be created')
+  }
+
+  console.log('\n📁 File System & Code Quality:')
+
+  // Check file linting and syntax
+  try {
+    const projectRoot = '/Volumes/Macintosh HD/Users/vsmith/navisai'
+
+    // 1. Check critical files for syntax errors
+    const criticalFiles = [
+      'apps/daemon/daemon.js',
+      'apps/daemon/src/index.js',
+      'apps/cli/src/commands.js',
+      'apps/pwa/src/lib/api/client.ts'
+    ]
+
+    console.log('  🔍 Syntax validation:')
+    for (const file of criticalFiles) {
+      const fullPath = path.join(projectRoot, file)
+      try {
+        await fs.access(fullPath)
+        const ext = path.extname(file)
+        const checkCmd = ext === '.ts' ? `tsc --noEmit "${fullPath}"` : `node -c "${fullPath}"`
+        await execAsync(`${checkCmd} 2>&1`)
+        console.log(`   ✅ ${file}`)
+      } catch (error) {
+        console.log(`   ❌ ${file}:`)
+        error.stdout?.split('\n').filter(line => line.trim()).forEach(line => {
+          console.log(`      ${line}`)
+        })
+        if (error.stderr) {
+          error.stderr.split('\n').filter(line => line.trim()).forEach(line => {
+            console.log(`      ${line}`)
+          })
+        }
+        allGood = false
+      }
+    }
+
+    // 2. Check package.json files
+    console.log('  📦 Package validation:')
+    const packageJsons = [
+      'package.json',
+      'apps/daemon/package.json',
+      'apps/cli/package.json',
+      'apps/pwa/package.json'
+    ]
+
+    for (const pkgPath of packageJsons) {
+      const fullPath = path.join(projectRoot, pkgPath)
+      try {
+        const content = await fs.readFile(fullPath, 'utf8')
+        JSON.parse(content)
+        console.log(`   ✅ ${pkgPath}`)
+      } catch (error) {
+        console.log(`   ❌ ${pkgPath}: ${error.message}`)
+        allGood = false
+      }
+    }
+
+    // 3. Check for required documentation
+    console.log('  📚 Documentation check:')
+    const requiredDocs = [
+      'docs/NETWORKING.md',
+      'docs/SECURITY.md',
+      'docs/SETUP.md',
+      'docs/BEADS_WORKFLOW.md',
+      'docs/IPC_TRANSPORT.md'
+    ]
+
+    for (const docPath of requiredDocs) {
+      const fullPath = path.join(projectRoot, docPath)
+      try {
+        await fs.access(fullPath)
+        const stats = await fs.stat(fullPath)
+        if (stats.size > 100) {
+          console.log(`   ✅ ${docPath}`)
+        } else {
+          console.log(`   ⚠️  ${docPath} (too small)`)
+        }
+      } catch (error) {
+        console.log(`   ❌ ${docPath}: missing`)
+        allGood = false
+      }
+    }
+
+    // 4. Run architecture verification if available
+    console.log('  🏗️  Architecture verification:')
+    try {
+      const { stdout: verifyOutput } = await execAsync('pnpm verify:arch 2>&1', { cwd: projectRoot })
+      if (verifyOutput.includes('✅')) {
+        console.log('   ✅ Architecture compliance verified')
+      } else {
+        console.log('   ⚠️  Architecture issues detected')
+        verifyOutput.split('\n').forEach(line => {
+          if (line.trim()) console.log(`      ${line}`)
+        })
+      }
+    } catch (error) {
+      console.log('   ⚠️  Could not run architecture verification')
+      if (error.stdout) {
+        error.stdout.split('\n').forEach(line => {
+          if (line.trim() && !line.includes('Command failed')) {
+            console.log(`      ${line}`)
+          }
+        })
+      }
+    }
+
+    // 5. Check ESLint configuration
+    console.log('  🔧 Linting configuration:')
+    try {
+      await fs.access(path.join(projectRoot, '.eslintrc.js'))
+      console.log('   ✅ ESLint configuration found')
+
+      // Try to run ESLint on critical files
+      try {
+        const { stdout } = await execAsync('npx eslint apps/daemon/daemon.js --format=compact 2>&1 || true', { cwd: projectRoot })
+        if (stdout.trim() === '') {
+          console.log('   ✅ Daemon file passes linting')
+        } else {
+          console.log('   ⚠️  Linting issues in daemon.js:')
+          stdout.split('\n').slice(0, 5).forEach(line => {
+            if (line.trim()) console.log(`      ${line}`)
+          })
+        }
+      } catch (error) {
+        console.log('   ⚠️  Could not run ESLint')
+      }
+    } catch {
+      console.log('   ⚠️  No ESLint configuration found')
+    }
+
+    // 6. Check for circular dependencies
+    console.log('  🔄 Dependency check:')
+    try {
+      const { stdout: madgeOutput } = await execAsync('npx madge --circular apps/ 2>&1 || true', { cwd: projectRoot })
+      if (madgeOutput.includes('0 circular')) {
+        console.log('   ✅ No circular dependencies found')
+      } else if (madgeOutput.includes('found')) {
+        console.log('   ⚠️  Circular dependencies detected')
+      }
+    } catch {
+      console.log('   ⚠️  Could not check for circular dependencies')
+    }
+
+    // 7. Check NavisDaemon class structure
+    console.log('  🏛️  Daemon class structure:')
+    try {
+      const daemonPath = path.join(projectRoot, 'apps/daemon/daemon.js')
+      const content = await fs.readFile(daemonPath, 'utf8')
+
+      // Check if setupRoutes and subsequent methods are properly indented
+      const setupRoutesMatch = content.match(/^(\s*)async setupRoutes\(\)/m)
+      if (setupRoutesMatch) {
+        const indent = setupRoutesMatch[1]
+        if (indent.length === 4) {
+          console.log('   ✅ Methods properly indented inside NavisDaemon class')
+        } else {
+          console.log(`   ❌ setupRoutes() has incorrect indentation (${indent.length} spaces, should be 4)`)
+          allGood = false
+        }
+      }
+
+      // Check if class has proper closing
+      const classMatch = content.match(/export class NavisDaemon \{[\s\S]*?^(\s*)\}/m)
+      if (classMatch) {
+        console.log('   ✅ NavisDaemon class properly closed')
+      } else {
+        console.log('   ❌ NavisDaemon class structure issue detected')
+        allGood = false
+      }
+    } catch (error) {
+      console.log('   ⚠️  Could not verify daemon class structure')
+    }
+
+  } catch (error) {
+    console.log('   ❌ File system check failed:', error.message)
+    allGood = false
+  }
+
+  console.log('\n🌐 Network Configuration:')
+
   // Bridge status and packet forwarding tests (Refs: navisai-lss)
   try {
     if (os === 'darwin') {
@@ -625,15 +884,36 @@ export async function doctorCommand() {
 
       // Test packet forwarding rules
       try {
-        const { stdout } = await execAsync('sudo pfctl -a navisai -s nat 2>/dev/null || echo "no rules"')
-        if (stdout.includes('rdr') && stdout.includes('443') && stdout.includes('127.0.0.1')) {
-          console.log('✅ Packet forwarding: NAT rules configured for 443 → loopback')
+        // Check NAT rules in correct anchor
+        const { stdout: natRules } = await execAsync('sudo pfctl -a navisai/proxy -s nat 2>/dev/null || echo "no nat rules"')
+        if (natRules.includes('rdr') && natRules.includes('443') && natRules.includes('127.0.0.1')) {
+          console.log('✅ Packet forwarding: NAT rules configured for 443 → 8443 (navisai/proxy)')
         } else {
-          console.log('⚠️  Packet forwarding: NAT rules not found or incomplete')
+          console.log('⚠️  Packet forwarding: NAT rules not found in navisai/proxy anchor')
+          console.log('   Run: navisai setup to install packet forwarding')
+          allGood = false
+        }
+
+        // Check filter rules
+        const { stdout: filterRules } = await execAsync('sudo pfctl -a navisai/filter -s rules 2>/dev/null || echo "no filter rules"')
+        if (filterRules.includes('keep state')) {
+          console.log('✅ Packet forwarding: Filter rules configured (navisai/filter)')
+        } else {
+          console.log('⚠️  Packet forwarding: Filter rules not found in navisai/filter anchor')
+          allGood = false
+        }
+
+        // Check if pf is enabled
+        const { stdout: pfEnabled } = await execAsync('sudo pfctl -s info 2>/dev/null | grep "Status: Enabled" || echo "disabled"')
+        if (pfEnabled.includes('Enabled')) {
+          console.log('✅ Packet filtering: pf is enabled')
+        } else {
+          console.log('⚠️  Packet filtering: pf is not enabled')
           allGood = false
         }
       } catch (error) {
         console.log('⚠️  Packet forwarding: Cannot check pfctl rules (may need sudo)')
+        console.log('   Error:', error.message)
         allGood = false
       }
 
