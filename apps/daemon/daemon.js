@@ -6,6 +6,9 @@
  */
 
 import Fastify from 'fastify'
+import helmet from '@fastify/helmet'
+import cors from '@fastify/cors'
+import rateLimit from '@fastify/rate-limit'
 import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
@@ -133,6 +136,49 @@ export class NavisDaemon {
         https: sslOptions
       })
 
+
+
+      // Register security middleware - Refs: navisai-zs3
+      await this.fastify.register(helmet, {
+        contentSecurityPolicy: {
+          directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            scriptSrc: ["'self'"],
+            imgSrc: ["'self'", "data:", "https:"],
+            connectSrc: ["'self'", "'wss:'", "'https:'"]
+          }
+        },
+        hsts: {
+          includeSubDomains: true,
+          preload: true
+        }
+      })
+
+      // Configure CORS per IPC_TRANSPORT.md - Refs: navisai-zs3
+      await this.fastify.register(cors, {
+        origin: (origin, callback) => {
+          // Allow same origin and navis.local
+          if (!origin || origin.includes("navis.local")) {
+            return callback(null, true)
+          }
+          // Check config for additional allowed origins
+          const allowedOrigins = this.config.daemon?.allowedOrigins || []
+          if (allowedOrigins.includes(origin)) {
+            return callback(null, true)
+          }
+          callback(new Error("Not allowed by CORS"))
+        },
+        credentials: true,
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+      })
+
+      // Rate limiting - Refs: navisai-zs3
+      await this.fastify.register(rateLimit, {
+        max: 100,
+        timeWindow: "1 minute",
+        skipOnError: true
+      })
       // Initialize services
       await this.initializeServices()
 

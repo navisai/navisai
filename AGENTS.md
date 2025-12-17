@@ -75,6 +75,7 @@ bd create "Task" -t task -d "Details"  # Create new issue
 - Do not “edit while thinking” in docs. Propose, get approval, then apply the doc changes in a focused patch.
 
 ### Required Doc Cross-Checks (Use As a Map)
+- Beads workflow: `docs/BEADS_WORKFLOW.md`, `docs/BEADS_AGENT_GUIDE.md`, and ALWAYS `bd ready` before starting
 - Networking / origins / ports / bridge / mDNS: `docs/NETWORKING.md`, `docs/SETUP.md`, `docs/SECURITY.md`
 - macOS user setup experience: `docs/MACOS_SETUP_EXPERIENCE.md`, `docs/ONBOARDING_FLOW.md`
 - REST/WS endpoints: `docs/IPC_TRANSPORT.md`, `packages/api-contracts`
@@ -90,7 +91,7 @@ NavisAI enforces architectural compliance through a multi-layered verification s
 - Enforces top-level directory structure (only apps/, packages/, docs/, scripts/)
 - Validates all required documentation exists
 - Checks PWA uses canonical origin `https://navis.local`
-- **NEW**: Verifies Beads integration documentation and configuration
+- Verifies Beads integration documentation and configuration
 
 **2. Git Hooks** (`scripts/install-git-hooks.mjs`):
 - Pre-commit hooks automatically run `pnpm verify`
@@ -182,6 +183,11 @@ bd ready  # See available work
 4. Update status with `bd update <id> --status <state>`
 
 **🚨 TODO vs Beads Rule**:
+**🚨 Tool Usage Violation Warning**:
+- The TodoWrite tool is NOT a separate TODO system
+- TodoWrite without Beads references violates this protocol
+- Agents MUST check `bd ready` before ANY implementation work
+- First question: "Did I check bd ready before using tools?"
 - ✅ **Beads issue**: `bd create "Fix auth flow" -t bug -d "Auth failing on mobile"`
 - ❌ **TODO comment**: `// TODO: Fix auth flow` (WITHOUT Beads issue)
 - ✅ **Reference in code**: `// Auth flow fix: Refs navisai-xyz` (AFTER Beads issue created)
@@ -834,6 +840,10 @@ Add to `package.json`:
 
 ## 15. Notes for Agents Working Here
 
+**Mandatory First Actions**:
+1. `bd quickstart` - Load context
+2. `bd ready` - Check existing work
+3. Only then use tools with Beads references
 - Ask: **“What is the smallest correct change?”**
 - Stop and ask if requirements are ambiguous
 - Do not speculate about premium features
