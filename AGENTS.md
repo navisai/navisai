@@ -5,7 +5,26 @@ This document defines **NavisAI-specific architecture, guardrails, and workflows
 
 If a conflict exists, **this file overrides Global AGENTS.md** for this repository.
 
-**🔗 Task Tracking**: This project uses **Beads** for persistent task tracking and multi-agent coordination. See Section 13 for complete Beads workflow and onboarding instructions. All implementation work must be tracked in Beads issues.
+**🔗 Task Tracking**: This project uses **Beads** (`bd` command) for persistent task tracking and multi-agent coordination. All implementation work must be tracked in Beads issues.
+
+---
+
+## 🚀 Agent Quick Start (First 3 Commands)
+
+```bash
+cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
+bd quickstart   # Load project context
+bd ready    # Find work to do
+bd create "Task" -t task -d "Details"  # Create new issue
+```
+
+**⚠️ CRITICAL**: **DO NOT CODE WITHOUT READING DOCS FIRST**. See Section 0 "Docs Are Canonical".
+
+**Before You Implement (Checklist)**:
+- [ ] Read the governing doc(s) from Section 0.4
+- [ ] Created/updated Beads issue with doc references
+- [ ] Checked `bd ready` for unblocked work
+- [ ] Verified dependencies are properly linked
 
 ---
 
@@ -79,7 +98,193 @@ All agents must run `pnpm verify` before committing. Install persistent hooks wi
 - **NEW**: Reference Beads issue IDs when applicable (e.g., "Refs: navisai-abc")
 
 
-## 1. Project Snapshot (NavisAI)
+## 1. Beads Task Management Protocol
+
+### Quick Start (3 Commands)
+```bash
+cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
+bd quickstart    # Load project context
+bd ready    # Find work to do
+bd create "Brief task description" -t task -d "Details"  # Create new issue
+```
+
+### 1.1 Canonical Task Tracking System
+
+- **Beads is the canonical task tracking system** for NavisAI development
+- All multi-agent work must use Beads for coordination and memory persistence
+- Beads issues provide dependency-aware task management across sessions
+- Integration is enforced via architecture verification scripts
+
+### 1.1.1 Agent Onboarding with Beads
+
+**First-Time Setup (One-Time)**:
+```bash
+# 1. Install Beads globally
+npm install -g beads
+
+# 2. Initialize Beads in this repository (already done)
+# If needed: bd init
+
+# 3. Setup Claude Code integration (recommended)
+pnpm beads:setup
+
+# 4. Load project context
+bd prime
+```
+
+**Daily Onboarding (Every Session)**:
+```bash
+cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
+bd quickstart  # Quick start guide for bd
+bd ready  # See available work
+```
+
+**Troubleshooting**:
+- Beads command not found: `npm install -g beads`
+- Issues not showing: Check you're in navisai directory, run `bd list`
+- For complete guidance: See `docs/BEADS_AGENT_GUIDE.md`
+- Help: `bd --help` or `bd <command> --help`
+
+### 1.2 Required Workflow Integration
+
+**Before ANY implementation work**:
+1. Create Beads issue with clear description and governing docs referenced
+2. Mark all dependencies using `bd dep add` (blocks, related, parent-child, discovered-from)
+3. Use required NavisAI labels: components, packages, domains, types
+4. Update status with `bd update <id> --status <state>`
+
+**Issue Creation Requirements**:
+- Title format: "Brief action-oriented description"
+- Description MUST reference governing docs (Section 13.3)
+- Priority (0-4, 0=highest): P0 for critical, P1 for important, P2 for normal, P3+ for low
+- Type: `feature`, `bug`, `task`, `epic`, `chore`
+- Labels: At least one component/domain label per `docs/BEADS_WORKFLOW.md`
+
+**Session Management**:
+- Run `bd quickstart` at session start to load project context
+- Update issue statuses before session end
+- Reference Beads IDs in commit messages when applicable
+- Use `bd ready` to find unblocked work before starting new tasks
+
+**Dependency Management**:
+- `blocks`: Task B must complete before Task A
+- `related`: Soft connection, doesn't block progress
+- `parent-child`: Epic/subtask hierarchical relationship
+- `discovered-from`: Auto-created when discovering related work
+
+### 1.3 Documentation Compliance (Mandatory)
+
+All Beads issues **must** reference governing documentation:
+- Network/bridge changes → `docs/NETWORKING.md`
+- API/endpoints → `docs/IPC_TRANSPORT.md` + `packages/api-contracts`
+- Setup/UX changes → `docs/SETUP.md` + `docs/ONBOARDING_FLOW.md`
+- Security/auth → `docs/SECURITY.md` + `docs/AUTH_MODEL.md`
+- Beads workflow → `docs/BEADS_WORKFLOW.md` (this document's governing spec)
+
+### 1.4 High-Risk Operations Protocol
+
+Section 7 high-risk operations require Beads issues with:
+- `high-risk` label applied
+- Approval dependency noted in issue description
+- Rollback plan documented in issue comments
+- Dependency link: `bd dep add <issue-id> <approval-id> --type blocks`
+
+### 1.5 Multi-Agent Coordination
+
+**Work Reservation**:
+- Create Beads issue immediately to claim work areas
+- Check `bd ready` before starting to avoid conflicts
+- Update status to `in_progress` when beginning work
+- Mark `done` on completion to unblock dependent work
+
+**Cross-Session Continuity**:
+- Beads maintains context across agent sessions
+- Issues track implementation progress against specifications
+- Dependencies prevent work conflicts and ensure proper sequencing
+
+### 1.6 Verification & Enforcement
+
+Beads integration is verified by:
+- `scripts/verify-architecture.mjs` checks Beads documentation and configuration
+- Pre-commit hooks prevent non-compliant commits
+- `pnpm verify` includes Beads compliance checks
+- Claude Code hooks (`bd setup claude --project`) provide automatic context loading
+
+### 1.7 Required Commands
+
+All agents must use established Beads commands:
+- `bd quickstart` - Load project context (~2k tokens)
+- `bd create "Task"` - Create issue with doc references
+- `bd ready` - Find unblocked work
+- `bd dep add <id> <parent> --type <type>` - Add dependencies
+- `bd update <id> --status <done|in_progress>` - Track progress
+
+**Complete Command Reference**:
+```bash
+# Session workflow
+bd quickstart                    # Load context at start
+bd ready                    # Find unblocked work
+bd list                     # Show all issues
+bd show <issue-id>          # View issue details
+
+# Issue management
+bd create "Title" -t <type> -p <priority> -d "Description"
+bd update <id> --status <open|in_progress|done>
+bd close <id> --reason "Completed"
+bd label add <id> <label>
+
+# Dependencies
+bd dep add <id> <dep-id> --type blocks|related|parent-child|discovered-from
+bd dep tree <id>            # Visualize dependencies
+```
+
+**Example Issue Creation**:
+```bash
+# Bridge implementation
+bd create "Add intelligent routing to bridge" \
+  -t feature \
+  -p 1 \
+  -d "Implement routing engine per docs/BRIDGE_IMPLEMENTATION.md v0.2" \
+  && bd label add <new-id> bridge,networking
+
+# High-risk operation
+bd create "Update bridge to require admin privileges" \
+  -t task \
+  -p 0 \
+  -d "HIGH-RISK: Modifies system services. See docs/SECURITY.md" \
+  && bd label add <new-id> high-risk,security
+```
+
+**Common Pitfalls**:
+- ❌ Creating issues without doc references
+- ❌ Forgetting to mark dependencies
+- ❌ Not running `bd quickstart` at session start
+- ❌ Using generic labels instead of required components/domains
+- ❌ Implementing before checking `bd ready`
+
+**Visual Workflow**:
+```
+Start Session → bd quickstart → bd ready → Select Work → bd update <id> --status in_progress
+       ↓                                                          ↓
+   Read Docs                                                 Implement
+       ↓                                                          ↓
+Create Issue (if needed) → bd create → Add Dependencies → bd update <id> --status done
+```
+
+### 1.8 Integration Status
+
+Beads integration is enforced through:
+- Governing document: `docs/BEADS_WORKFLOW.md`
+- Protocol definition: This Section 13 in AGENTS.md
+- Verification: `scripts/verify-architecture.mjs`
+- Tool integration: `package.json` scripts
+- Git hooks: Pre-commit enforcement
+
+---
+
+
+
+## 2. Project Snapshot (NavisAI)
 
 - **Project type**: Local-first developer control plane
 - **Primary components**:
@@ -103,7 +308,7 @@ All agents must run `pnpm verify` before committing. Install persistent hooks wi
 
 ---
 
-## 2. Monorepo Topology (NavisAI-specific)
+## 3. Monorepo Topology (NavisAI-specific)
 
 ```
 apps/
@@ -132,7 +337,7 @@ Do not collapse daemon subsystems or bypass the daemon from clients.
 
 ---
 
-## 3. NavisAI Non-Negotiables (Overrides)
+## 4. NavisAI Non-Negotiables (Overrides)
 
 These rules **override** any permissive defaults in Global AGENTS.md:
 
@@ -159,7 +364,7 @@ These rules **override** any permissive defaults in Global AGENTS.md:
 
 ---
 
-## 4. Tooling & Environment Constraints
+## 5. Tooling & Environment Constraints
 
 - **Package manager**: `pnpm` only
 - **Node**: modern Node (current dev on Node 22.x)
@@ -188,7 +393,7 @@ Agents must not introduce alternative package managers or global installs.
 
 ---
 
-## 5. Command Discipline
+## 6. Command Discipline
 
 Run only commands that exist in the relevant `package.json`.
 
@@ -224,7 +429,7 @@ pnpm format:check        # Check formatting without modifying
 
 ---
 
-## 6. Database & Persistence Policy
+## 7. Database & Persistence Policy
 
 - SQLite is the default persistence layer.
 - Drizzle ORM is used for schema + queries.
@@ -239,7 +444,7 @@ Agents must not “fix” native build issues by making drivers mandatory.
 
 ---
 
-## 7. High-Risk Operations (NavisAI-specific)
+## 8. High-Risk Operations (NavisAI-specific)
 
 The following are always considered **high-risk** in this project:
 
@@ -259,7 +464,7 @@ When unsure, treat the action as high-risk.
 
 ---
 
-## 8. Logging & Observability
+## 9. Logging & Observability
 
 - Use shared logging utilities (`@navisai/logging`)
 - Logs must be structured, scoped, and meaningful
@@ -269,7 +474,7 @@ Logs are part of the UX for a local control plane.
 
 ---
 
-## 9. Change Workflow (Local)
+## 10. Change Workflow (Local)
 
 1. **Plan**
    - Identify affected subsystems
@@ -303,7 +508,7 @@ Logs are part of the UX for a local control plane.
 
 ---
 
-## 10. Local Verification Checklist
+## 11. Local Verification Checklist
 
 - [ ] `pnpm install` succeeds on clean checkout
 - [ ] No mandatory native deps introduced
@@ -319,7 +524,7 @@ Logs are part of the UX for a local control plane.
 
 ---
 
-## 11. Security Posture (Local)
+## 12. Security Posture (Local)
 
 - Default to local-only
 - **ALL network activity MUST use HTTPS** (per SECURITY.md)
@@ -331,7 +536,7 @@ Logs are part of the UX for a local control plane.
 
 ---
 
-## 12. Notes for Agents Working Here
+## 13. Notes for Agents Working Here
 
 - Ask: **“What is the smallest correct change?”**
 - Stop and ask if requirements are ambiguous
@@ -339,174 +544,6 @@ Logs are part of the UX for a local control plane.
 - Treat this file as binding
 - **No attribution**: Do not add AI-generated attribution to commits, messages, or code
 - Before acting, double-check this file (via `CLAUDE.md` if you need a shortcut) and the relevant `docs/` pages so you never drift from documented architecture.
-
----
-
-## 13. Beads Task Management Protocol
-
-### Quick Start (3 Commands)
-```bash
-cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
-bd prime    # Load project context
-bd ready    # Find work to do
-bd create "Brief task description" -t task -d "Details"  # Create new issue
-```
-
-### 13.1 Canonical Task Tracking System
-
-- **Beads is the canonical task tracking system** for NavisAI development
-- All multi-agent work must use Beads for coordination and memory persistence
-- Beads issues provide dependency-aware task management across sessions
-- Integration is enforced via architecture verification scripts
-
-### 13.1.1 Agent Onboarding with Beads
-
-**First-Time Setup (One-Time)**:
-```bash
-# 1. Install Beads globally
-npm install -g beads
-
-# 2. Initialize Beads in this repository (already done)
-# If needed: bd init
-
-# 3. Setup Claude Code integration (recommended)
-pnpm beads:setup
-
-# 4. Load project context
-bd prime
-```
-
-**Daily Onboarding (Every Session)**:
-```bash
-cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
-bd prime  # Load current issues and context
-bd ready  # See available work
-```
-
-**Troubleshooting**:
-- Beads command not found: `npm install -g beads`
-- Issues not showing: Check you're in navisai directory, run `bd list`
-- For complete guidance: See `docs/BEADS_AGENT_GUIDE.md`
-- Help: `bd --help` or `bd <command> --help`
-
-### 13.2 Required Workflow Integration
-
-**Before ANY implementation work**:
-1. Create Beads issue with clear description and governing docs referenced
-2. Mark all dependencies using `bd dep add` (blocks, related, parent-child, discovered-from)
-3. Use required NavisAI labels: components, packages, domains, types
-4. Update status with `bd update <id> --status <state>`
-
-**Issue Creation Requirements**:
-- Title format: "Brief action-oriented description"
-- Description MUST reference governing docs (Section 13.3)
-- Priority (0-4, 0=highest): P0 for critical, P1 for important, P2 for normal, P3+ for low
-- Type: `feature`, `bug`, `task`, `epic`, `chore`
-- Labels: At least one component/domain label per `docs/BEADS_WORKFLOW.md`
-
-**Session Management**:
-- Run `bd prime` at session start to load project context
-- Update issue statuses before session end
-- Reference Beads IDs in commit messages when applicable
-- Use `bd ready` to find unblocked work before starting new tasks
-
-**Dependency Management**:
-- `blocks`: Task B must complete before Task A
-- `related`: Soft connection, doesn't block progress
-- `parent-child`: Epic/subtask hierarchical relationship
-- `discovered-from`: Auto-created when discovering related work
-
-### 13.3 Documentation Compliance (Mandatory)
-
-All Beads issues **must** reference governing documentation:
-- Network/bridge changes → `docs/NETWORKING.md`
-- API/endpoints → `docs/IPC_TRANSPORT.md` + `packages/api-contracts`
-- Setup/UX changes → `docs/SETUP.md` + `docs/ONBOARDING_FLOW.md`
-- Security/auth → `docs/SECURITY.md` + `docs/AUTH_MODEL.md`
-- Beads workflow → `docs/BEADS_WORKFLOW.md` (this document's governing spec)
-
-### 13.4 High-Risk Operations Protocol
-
-Section 7 high-risk operations require Beads issues with:
-- `high-risk` label applied
-- Approval dependency noted in issue description
-- Rollback plan documented in issue comments
-- Dependency link: `bd dep add <issue-id> <approval-id> --type blocks`
-
-### 13.5 Multi-Agent Coordination
-
-**Work Reservation**:
-- Create Beads issue immediately to claim work areas
-- Check `bd ready` before starting to avoid conflicts
-- Update status to `in_progress` when beginning work
-- Mark `done` on completion to unblock dependent work
-
-**Cross-Session Continuity**:
-- Beads maintains context across agent sessions
-- Issues track implementation progress against specifications
-- Dependencies prevent work conflicts and ensure proper sequencing
-
-### 13.6 Verification & Enforcement
-
-Beads integration is verified by:
-- `scripts/verify-architecture.mjs` checks Beads documentation and configuration
-- Pre-commit hooks prevent non-compliant commits
-- `pnpm verify` includes Beads compliance checks
-- Claude Code hooks (`bd setup claude --project`) provide automatic context loading
-
-### 13.7 Required Commands
-
-All agents must use established Beads commands:
-- `bd prime` - Load project context (~2k tokens)
-- `bd create "Task"` - Create issue with doc references
-- `bd ready` - Find unblocked work
-- `bd dep add <id> <parent> --type <type>` - Add dependencies
-- `bd update <id> --status <done|in_progress>` - Track progress
-
-**Complete Command Reference**:
-```bash
-# Session workflow
-bd prime                    # Load context at start
-bd ready                    # Find unblocked work
-bd list                     # Show all issues
-bd show <issue-id>          # View issue details
-
-# Issue management
-bd create "Title" -t <type> -p <priority> -d "Description"
-bd update <id> --status <open|in_progress|done>
-bd close <id> --reason "Completed"
-bd label add <id> <label>
-
-# Dependencies
-bd dep add <id> <dep-id> --type blocks|related|parent-child|discovered-from
-bd dep tree <id>            # Visualize dependencies
-```
-
-**Example Issue Creation**:
-```bash
-# Bridge implementation
-bd create "Add intelligent routing to bridge" \
-  -t feature \
-  -p 1 \
-  -d "Implement routing engine per docs/BRIDGE_IMPLEMENTATION.md v0.2" \
-  && bd label add <new-id> bridge,networking
-
-# High-risk operation
-bd create "Update bridge to require admin privileges" \
-  -t task \
-  -p 0 \
-  -d "HIGH-RISK: Modifies system services. See docs/SECURITY.md" \
-  && bd label add <new-id> high-risk,security
-```
-
-### 13.8 Integration Status
-
-Beads integration is enforced through:
-- Governing document: `docs/BEADS_WORKFLOW.md`
-- Protocol definition: This Section 13 in AGENTS.md
-- Verification: `scripts/verify-architecture.mjs`
-- Tool integration: `package.json` scripts
-- Git hooks: Pre-commit enforcement
 
 ---
 
