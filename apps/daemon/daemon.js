@@ -242,10 +242,12 @@ export class NavisDaemon {
       // Setup routes
       await this.setupRoutes()
 
-      // Setup WebSocket
-      this.wsManager = new WebSocketManager(this.fastify, this.dbManager)
-      await this.wsManager.initialize()
-      this.approvalService?.setWebSocketManager(this.wsManager)
+      // Setup WebSocket (optional)
+      if (this.dbManager) {
+        this.wsManager = new WebSocketManager(this.fastify, this.dbManager)
+        await this.wsManager.initialize()
+        this.approvalService?.setWebSocketManager(this.wsManager)
+      }
 
       // Start the server
       await this.fastify.listen({ port, host })
@@ -278,9 +280,15 @@ export class NavisDaemon {
       mkdirSync(dataDir, { recursive: true })
     }
 
-    // Initialize database (required)
-    await dbManager.initialize()
-    this.dbManager = dbManager
+    // Initialize database (optional per architecture)
+    try {
+      await dbManager.initialize()
+      this.dbManager = dbManager
+      console.log('✅ Database initialized')
+    } catch (error) {
+      console.warn('⚠️  Database initialization failed (optional per architecture):', error.message)
+      this.dbManager = null
+    }
 
     // Initialize all services
     this.projectService = new ProjectService()
@@ -329,7 +337,7 @@ export class NavisDaemon {
     )
 
     // Auth-required endpoints - Add authentication middleware
-    const authMiddleware = createAuthMiddleware(this.dbManager)
+    const authMiddleware = this.dbManager ? createAuthMiddleware(this.dbManager) : null
 
     // Projects endpoints
     this.fastify.get(NAVIS_PATHS.projects.list, {
@@ -409,28 +417,28 @@ export class NavisDaemon {
       this.fastify.get(NAVIS_PATHS.welcome, async () => {
         return `<!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>NavisAI</title>
-    <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#f8fafc; margin:0; }
-      .wrap { max-width: 720px; margin: 0 auto; padding: 32px 16px; }
-      .card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; }
-      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <div class="card">
-        <h1 style="margin:0 0 8px;">NavisAI</h1>
-        <p style="margin:0 0 12px; color:#475569;">PWA assets are not present yet.</p>
-        <p style="margin:0 0 12px; color:#475569;">Build the PWA and restart the daemon:</p>
-        <pre style="margin:0; padding:12px; background:#f1f5f9; border-radius:10px;"><code>pnpm --filter @navisai/pwa build
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>NavisAI</title>
+        <style>
+          body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#f8fafc; margin:0; }
+          .wrap { max-width: 720px; margin: 0 auto; padding: 32px 16px; }
+          .card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; }
+          code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <div class="card">
+            <h1 style="margin:0 0 8px;">NavisAI</h1>
+            <p style="margin:0 0 12px; color:#475569;">PWA assets are not present yet.</p>
+            <p style="margin:0 0 12px; color:#475569;">Build the PWA and restart the daemon:</p>
+            <pre style="margin:0; padding:12px; background:#f1f5f9; border-radius:10px;"><code>pnpm --filter @navisai/pwa build
 pnpm --filter @navisai/daemon dev</code></pre>
-      </div>
-    </div>
-  </body>
+          </div>
+        </div>
+      </body>
 </html>`
       })
     }
