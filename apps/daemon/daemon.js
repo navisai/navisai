@@ -59,6 +59,8 @@ import { SessionService } from './services/session.js'
 import { ApprovalService } from './services/approval.js'
 import { PairingService } from './services/pairing.js'
 import { BleAdvertiser } from './services/ble.js'
+import { logStore } from './log-store.js'
+import { logger } from '@navisai/logging'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -112,9 +114,74 @@ export class NavisDaemon {
     return null
   }
 
+  setupLogCapture() {
+    // Override console methods to capture logs
+    const originalConsole = {
+      log: console.log,
+      error: console.error,
+      warn: console.warn,
+      info: console.info,
+      debug: console.debug
+    }
+
+    const captureLog = (level, args) => {
+      const message = args.map(arg =>
+        typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+      ).join(' ')
+
+      const logEntry = {
+        level: level.toUpperCase(),
+        message,
+        timestamp: new Date().toISOString(),
+        source: 'daemon'
+      }
+
+      // Store in log buffer for streaming
+      logStore.addLog(logEntry)
+
+      // Also broadcast to WebSocket clients
+      if (this.wsManager) {
+        this.wsManager.broadcast({ type: 'log', data: logEntry }, 'logs')
+      }
+
+      // Call original console method
+      originalConsole[level](...args)
+    }
+
+    // Override console methods
+    console.log = (...args) => captureLog('info', args)
+    console.error = (...args) => captureLog('error', args)
+    console.warn = (...args) => captureLog('warn', args)
+    console.info = (...args) => captureLog('info', args)
+    console.debug = (...args) => captureLog('debug', args)
+
+    // Override shared logger
+    const originalLog = logger.log
+    logger.log = (level, message, meta = {}) => {
+      const logEntry = {
+        level: level.toUpperCase(),
+        message,
+        ...meta,
+        timestamp: new Date().toISOString(),
+        source: 'daemon'
+      }
+
+      logStore.addLog(logEntry)
+
+      if (this.wsManager) {
+        this.wsManager.broadcast({ type: 'log', data: logEntry }, 'logs')
+      }
+
+      return originalLog.call(logger, level, message, meta)
+    }
+  }
+
   async start() {
     try {
       console.log('🚀 Starting Navis daemon...')
+
+      // Set up log capture - Refs: navisai-jma
+      this.setupLogCapture()
 
       // Override port from environment if set
       if (process.env.NAVIS_PORT) {
@@ -283,8 +350,9 @@ export class NavisDaemon {
     this.fastify.post(NAVIS_PATHS.discovery.scan, this.scanHandler.bind(this))
     this.fastify.post(NAVIS_PATHS.discovery.index, this.indexHandler.bind(this))
 
-    // Logs endpoint
+    // Logs endpoints
     this.fastify.get('/logs', this.getLogsHandler.bind(this))
+    this.fastify.get('/logs/stream', this.getLogStreamHandler.bind(this))
 
     // Pairing QR endpoint
     this.fastify.get('/pairing/qr', this.getPairingQRHandler.bind(this))
@@ -538,11 +606,52 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async getLogsHandler(request, reply) {
-    // TODO: Add auth middleware and implement log streaming
+    // Return recent logs from buffer
+    const { limit = 100, level } = request.query
+    let logs = logStore.getRecentLogs(parseInt(limit))
+
+    if (level) {
+      logs = logs.filter(log => log.level === level.toUpperCase())
+    }
+
     return {
-      logs: [],
+      logs,
       levels: ['error', 'warn', 'info', 'debug']
     }
+  }
+
+  async getLogStreamHandler(request, reply) {
+    // Set up Server-Sent Events for log streaming
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Cache-Control'
+    })
+
+    // Send initial connection event
+    reply.raw.write(`data: ${JSON.stringify({
+      type: 'connected',
+      timestamp: new Date().toISOString()
+    })}\n\n`)
+
+    // Add client to log store
+    logStore.addClient(reply.raw)
+
+    // Set up heartbeat to keep connection alive
+    const heartbeat = setInterval(() => {
+      try {
+        reply.raw.write(`: heartbeat\n\n`)
+      } catch (error) {
+        clearInterval(heartbeat)
+      }
+    }, 30000)
+
+    // Clean up on disconnect
+    request.raw.on('close', () => {
+      clearInterval(heartbeat)
+    })
   }
 
   async getPairingQRHandler(request, reply) {

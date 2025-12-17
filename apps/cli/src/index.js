@@ -52,6 +52,10 @@ program
 program
   .command('logs')
   .description('Follow daemon logs')
+  .option('-l, --level <level>', 'Filter by log level (error, warn, info, debug)')
+  .option('-t, --timestamp', 'Show timestamps')
+  .option('-v, --verbose', 'Show additional log details')
+  .option('--no-follow', 'Show recent logs and exit (don\'t follow)')
   .action(logsCommand)
 
 program

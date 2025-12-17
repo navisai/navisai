@@ -539,7 +539,7 @@ export async function doctorCommand() {
     } else {
       console.log(
         `⚠️  mDNS: navis.local resolved to ${mdnsResult.address} but LAN IPs are ${lanAddresses.join(', ') ||
-          'none'}`
+        'none'}`
       )
       if (lanAddresses.length > 0) {
         allGood = false
@@ -664,23 +664,157 @@ export async function cleanupCommand(options = {}) {
   console.log('✅ Local state removed.')
 }
 
-export async function logsCommand() {
+export async function logsCommand(options = {}) {
   try {
     const daemonProcess = await findDaemonProcess()
     if (!daemonProcess) {
-      console.log('Daemon is not running')
+      console.log('❌ Daemon is not running')
       return
     }
 
-    console.log('Following daemon logs (Ctrl+C to stop)...\n')
+    console.log('📋 Following daemon logs (Ctrl+C to stop)...\n')
 
-    // In a real implementation, this would connect to daemon's log stream
-    // For now, just show that daemon is running
-    console.log('Daemon is running with PID:', daemonProcess.pid)
-    console.log('Note: Log streaming not yet implemented')
+    // Build URL with query parameters
+    const url = new URL(`${CANONICAL_ORIGIN}/logs/stream`)
+    if (options.level) {
+      url.searchParams.set('level', options.level)
+    }
+    if (options.follow !== false) {
+      url.searchParams.set('follow', 'true')
+    }
+
+    // Use native HTTPS to connect to Server-Sent Events endpoint
+    const https = await import('node:https')
+    const http = await import('node:http')
+
+    const client = url.protocol === 'https:' ? https : http
+
+    const requestOptions = {
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname + url.search,
+      method: 'GET',
+      headers: {
+        'Accept': 'text/event-stream',
+        'Cache-Control': 'no-cache'
+      },
+      // Accept self-signed certificates for local development
+      rejectUnauthorized: false
+    }
+
+    console.log('✅ Connecting to daemon log stream...\n')
+
+    const req = client.request(requestOptions, (res) => {
+      if (res.statusCode !== 200) {
+        console.error(`❌ Server responded with ${res.statusCode}`)
+        process.exit(1)
+      }
+
+      let buffer = ''
+
+      res.on('data', (chunk) => {
+        buffer += chunk.toString()
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || '' // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.substring(6))
+
+              if (data.type === 'connected') {
+                console.log('📡 Streaming logs...\n')
+                continue
+              }
+
+              if (data.type === 'log') {
+                formatAndPrintLog(data, options)
+              } else if (data.level && data.message) {
+                // Handle direct log entries
+                formatAndPrintLog(data, options)
+              }
+            } catch (error) {
+              // Ignore parsing errors for heartbeat messages
+              if (!line.startsWith(':')) {
+                console.log('Raw:', line)
+              }
+            }
+          }
+        }
+      })
+
+      res.on('end', () => {
+        if (options.follow !== false) {
+          console.log('\n📡 Log stream ended')
+        }
+      })
+    })
+
+    req.on('error', (error) => {
+      console.error('❌ Connection to daemon failed:', error.message)
+      process.exit(1)
+    })
+
+    req.end()
+
+    // Handle Ctrl+C
+    process.on('SIGINT', () => {
+      console.log('\n\n👋 Stopping log stream...')
+      req.destroy()
+      process.exit(0)
+    })
+
+    // Keep the process alive if following
+    if (options.follow !== false) {
+      await new Promise(() => { })
+    }
+
   } catch (error) {
-    console.error('Failed to fetch logs:', error.message)
+    console.error('❌ Failed to fetch logs:', error.message)
+
+    // Fallback to checking if daemon is running
+    if (error.message.includes('Cannot resolve module')) {
+      console.log('\n💡 Tip: Make sure you have run `pnpm install` to install dependencies')
+    }
   }
+}
+
+function formatAndPrintLog(log, options) {
+  const { level, message, timestamp, source } = log
+  const time = options.timestamp
+    ? new Date(timestamp).toLocaleTimeString()
+    : ''
+
+  let coloredLevel = level
+  let coloredMessage = message
+
+  // Add colors if supported
+  if (process.stdout.isTTY) {
+    const colors = {
+      ERROR: '\x1b[31m', // Red
+      WARN: '\x1b[33m',  // Yellow
+      INFO: '\x1b[36m',  // Cyan
+      DEBUG: '\x1b[37m'  // White
+    }
+    const reset = '\x1b[0m'
+
+    coloredLevel = `${colors[level] || ''}${level}${reset}`
+
+    if (level === 'ERROR') {
+      coloredMessage = `\x1b[31m${message}\x1b[0m`
+    } else if (level === 'WARN') {
+      coloredMessage = `\x1b[33m${message}\x1b[0m`
+    }
+  }
+
+  // Format output
+  const parts = []
+  if (time) parts.push(`[${time}]`)
+  parts.push(`${coloredLevel}:`)
+  if (source && options.verbose) parts.push(`[${source}]`)
+  parts.push(coloredMessage)
+
+  console.log(parts.join(' '))
 }
 
 export async function scanCommand(path, options = {}) {
