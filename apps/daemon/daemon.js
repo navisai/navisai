@@ -60,6 +60,8 @@ import { PairingService } from './services/pairing.js'
 import { BleAdvertiser } from './services/ble.js'
 import { logStore } from './log-store.js'
 import { logger } from '@navisai/logging'
+import discovery from '@navisai/discovery'
+import { detectorRegistry } from '@navisai/discovery/detectors/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -298,6 +300,19 @@ export class NavisDaemon {
       bleAdvertiser: this.bleAdvertiser,
     })
     await this.pairingService.initialize()
+
+    // Initialize discovery engine with detectors
+    const detectors = detectorRegistry.getAll()
+    for (const detector of detectors) {
+      discovery.registerDetector(
+        detector.name,
+        async (path) => {
+          const result = await detector.detect(path)
+          return result.confidence || 0
+        },
+        detector.indicators?.map(ind => ind.file) || []
+      )
+    }
   }
 
   async setupRoutes() {
@@ -535,26 +550,117 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async scanHandler(request, reply) {
-    // Refs: navisai-4oi (discovery endpoint implementation needed)
-    const { path, options } = request.body
-    return {
-      scannedPath: path,
-      count: 0,
-      projects: []
+    // Refs: navisai-4oi (discovery endpoint implementation)
+    const { path, options = {} } = request.body
+
+    if (!path) {
+      reply.code(400)
+      return { error: 'Path is required' }
+    }
+
+    try {
+      // Use discovery engine to scan for projects
+      const scanOptions = {
+        maxDepth: options.depth || this.config.get('discovery.scanDepth'),
+        excludeDirs: options.excludeDirs || ['node_modules', '.git', '.next', 'dist', 'build', 'coverage', 'target'],
+        excludeFiles: options.excludeFiles || ['package-lock.json', 'yarn.lock', '.DS_Store', 'Thumbs.db'],
+        ...options
+      }
+
+      const projects = await discovery.scan(path, scanOptions)
+
+      return {
+        scannedPath: path,
+        count: projects.length,
+        projects: projects.map(p => ({
+          id: p.id || Buffer.from(p.path).toString('base64'),
+          name: p.name,
+          path: p.path,
+          detected: true,
+          detectedAt: p.lastScanned,
+          classification: p.classification || null,
+          signals: p.signals || [],
+          confidence: p.confidence || 0,
+          metadata: {
+            size: p.signals?.length || 0,
+            hasPackageJson: !!p.packageJson
+          }
+        }))
+      }
+    } catch (error) {
+      logger.error(`Scan failed for ${path}:`, error)
+      reply.code(500)
+      return {
+        error: 'Scan failed',
+        message: error.message,
+        scannedPath: path
+      }
     }
   }
 
   async indexHandler(request, reply) {
-    // Refs: navisai-4oi (discovery endpoint implementation needed)
-    const { paths } = request.body
-    return {
-      total: paths.length,
-      discovered: 0,
-      results: paths.map(p => ({
-        path: p,
-        success: false,
-        error: 'Not implemented'
-      }))
+    // Refs: navisai-4oi (discovery endpoint implementation)
+    const { paths, refresh = false } = request.body
+
+    if (!Array.isArray(paths) || paths.length === 0) {
+      reply.code(400)
+      return { error: 'Paths array is required' }
+    }
+
+    try {
+      const results = []
+      let discovered = 0
+
+      // Process each path
+      for (const path of paths) {
+        try {
+          // For individual paths, we need to check if it's a project
+          // Since DiscoveryEngine doesn't have a single analyze method, we'll use analyzeProject
+          const project = await discovery.analyzeProject(path)
+
+          results.push({
+            path,
+            success: true,
+            project: project ? {
+              id: project.id || Buffer.from(project.path).toString('base64'),
+              name: project.name,
+              path: project.path,
+              detected: true,
+              detectedAt: project.lastScanned,
+              classification: project.classification || null,
+              signals: project.signals || [],
+              confidence: project.confidence || 0,
+              metadata: {
+                size: project.signals?.length || 0,
+                hasPackageJson: !!project.packageJson
+              }
+            } : null
+          })
+
+          if (project) {
+            discovered++
+          }
+        } catch (error) {
+          results.push({
+            path,
+            success: false,
+            error: error.message
+          })
+        }
+      }
+
+      return {
+        total: paths.length,
+        discovered,
+        results
+      }
+    } catch (error) {
+      logger.error('Index operation failed:', error)
+      reply.code(500)
+      return {
+        error: 'Index operation failed',
+        message: error.message
+      }
     }
   }
 

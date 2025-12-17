@@ -276,11 +276,13 @@ class ApiClient {
     const result = await response.json()
 
     // Return the analysis for the requested path
-    return result.results?.[0] || {
-      path,
-      success: false,
-      error: 'Analysis failed'
-    }
+    return (
+      result.results?.[0] || {
+        path,
+        success: false,
+        error: 'Analysis failed',
+      }
+    )
   }
 
   async startPairing(payload: {
