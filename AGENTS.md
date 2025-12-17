@@ -643,7 +643,158 @@ sudo ./apps/daemon/src/bridge-packet.js &
 
 ---
 
-## 13. Notes for Agents Working Here
+## 13. Repository Hygiene (Keep It Clean)
+
+### 13.1 Test File Organization Standards
+- **Unit tests**: Place alongside source files with `.test.js` suffix or in `__tests__/` directories
+- **Integration tests**: Use `tests/integration/` directory only
+- **E2E tests**: Use `tests/e2e/` directory only
+- **Temporary fixtures**: Use `tests/fixtures/` with `.fixture.` suffix
+- **Manual test scripts**: Never commit manual test scripts - keep in local scratch space only
+
+### 13.2 Pre-Commit Cleanliness Checks
+Before every commit, agents must run:
+```bash
+# Remove common test debris
+find . -name "*.test.log" -delete
+find . -name ".coverage" -delete
+find . -name "lcov.info" -delete
+find . -name "*.tmp" -delete
+find . -name "node_modules\.cache" -type d -exec rm -rf {} +
+
+# Check for unwanted patterns
+git status --porcelain | grep -E "\.(test|spec|tmp)\.(js|ts|json)$" && echo "Remove test files before committing"
+```
+
+### 13.3 Required .gitignore Patterns
+Ensure these patterns are in `.gitignore`:
+```
+# Test artifacts
+coverage/
+.nyc_output/
+lcov.info
+*.test.log
+*.coverage
+
+# Temporary files
+*.tmp
+*.temp
+node_modules/.cache/
+.pnpm-store/
+
+# IDE test files
+.vscode-test/
+test-results/
+playwright-report/
+```
+
+### 13.4 Test Data Management
+- **Never commit real user data**: Use anonymized fixtures only
+- **Generate test data**: Create programmatically in test setup
+- **External test data**: Document source but don't commit binaries
+- **Database test files**: Use in-memory or temporary SQLite databases
+
+### 13.5 Clean Development Workflow
+1. **Before creating tests**:
+   - Check if similar tests already exist
+   - Verify test location follows organization standards
+   - Use existing test utilities and fixtures
+
+2. **While testing**:
+   - Use `--watch` modes to avoid artifact generation
+   - Direct temporary outputs to `/tmp` or system temp directory
+   - Clean up immediately after test runs
+
+3. **After testing**:
+   - Run `pnpm test:clean` if available
+   - Manually remove any test artifacts
+   - Verify `git status` shows only intended changes
+
+### 13.6 Periodic Repository Cleanup (Automated)
+Agents should perform weekly cleanups:
+```bash
+# Remove orphaned test directories
+find . -type d -name "__tests__" -empty -delete
+find . -type d -name "test-results" -exec rm -rf {} +
+find . -type d -name ".nyc_output" -exec rm -rf {} +
+
+# Remove stale coverage reports
+find . -name "coverage" -type d -mtime +7 -exec rm -rf {} +
+```
+
+### 13.7 Test File Lifecycle Rules
+- **Pull Request tests**: Delete after PR merge unless specifically marked for reuse
+- **Debug test files**: Never commit - use local branches only
+- **Performance benchmarks**: Keep in dedicated `benchmarks/` directory only
+- **Documentation examples**: Place in `docs/examples/` not as test files
+
+---
+
+## 14. Continuous Verification Workflow
+
+### 14.1 Automated Verification Cadence
+**Daily Checks**:
+- Run `pnpm verify` to ensure all builds pass
+- Check for new TODO/FIXME comments without Beads links
+- Verify all endpoints have corresponding tests
+- Scan for orphaned documentation (docs for non-existent features)
+
+**Weekly Deep Verification**:
+- Cross-reference `docs/` with implementation:
+  - All documented endpoints exist in code
+  - All documented config options are implemented
+  - All security measures in SECURITY.md are active
+- Check Beads for P1/P2 tasks without recent progress
+- Verify test coverage remains above 80%
+- Audit package.json for unused dependencies
+
+### 14.2 Gap Detection Protocol
+When gaps are detected:
+1. **Document immediately**: Create Bead with descriptive title
+2. **Assess impact**: Label P0 (critical), P1 (high), P2 (medium), P3 (low)
+3. **Link dependencies**: Add cross-references to related Beads
+4. **Create test**: Write failing test that documents expected behavior
+5. **Assign owner**: Tag appropriate agent or team
+
+### 14.3 Auto-Test Generation (For Gaps)
+For critical gaps (P0/P1):
+```javascript
+// Example: Auto-generate test for missing endpoint
+const generateEndpointTest = (method, path, expectedStatus) => ({
+  type: 'test',
+  file: `tests/api${path.replace(/\//g, '_')}.test.js`,
+  content: `describe('${method} ${path}', () => {
+    it('should return ${expectedStatus}', async () => {
+      const response = await request(app)[method.toLowerCase()](${path})
+      expect(response.status).toBe(${expectedStatus})
+    })
+  })`
+})
+```
+
+### 14.4 Verification Scripts
+Add to `package.json`:
+```json
+{
+  "scripts": {
+    "verify:docs": "node scripts/verify-docs-coverage.js",
+    "verify:tasks": "node scripts/check-beads-coverage.js",
+    "verify:clean": "node scripts/check-repo-hygiene.js",
+    "verify:all": "pnpm verify:docs && pnpm verify:tasks && pnpm verify:clean"
+  }
+}
+```
+
+### 14.5 Monthly Architecture Review
+- Verify all components in `docs/ARCHITECTURE.md` have current implementations
+- Check performance benchmarks match documented targets
+- Review security audit logs against SECURITY.md requirements
+- Validate onboarding flow against ONBOARDING_FLOW.md
+- Ensure all premium hooks are properly stubbed in OSS version
+
+---
+
+## 15. Notes for Agents Working Here
 
 - Ask: **“What is the smallest correct change?”**
 - Stop and ask if requirements are ambiguous
