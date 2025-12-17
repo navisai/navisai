@@ -182,7 +182,7 @@ bd ready  # See available work
 3. Use required NavisAI labels: components, packages, domains, types
 4. Update status with `bd update <id> --status <state>`
 
-**🚨 TODO vs Beads Rule**:
+**🚨 TODO or ToDoWrite vs Beads Rule**:
 **🚨 Tool Usage Violation Warning**:
 - The TodoWrite tool is NOT a separate TODO system
 - TodoWrite without Beads references violates this protocol
