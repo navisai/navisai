@@ -92,6 +92,18 @@ Examples:
 - `GET /certs/navis.local.crt`  
   - Public certificate download endpoint to support mobile trust UX.
 
+- `POST /api/discovery/scan`  
+  - Scan a directory for projects.
+  - Body: `{ path: string, options?: { depth?: number, includeHidden?: boolean } }`
+  - Requires auth.
+  - Returns: `{ scannedPath: string, count: number, projects: Project[] }`
+
+- `POST /api/discovery/index`  
+  - Analyze specific paths for project information.
+  - Body: `{ paths: string[], refresh?: boolean }`
+  - Requires auth.
+  - Returns: `{ total: number, discovered: number, results: ProjectResult[] }`
+
 ---
 
 ## 5. WebSocket Channels

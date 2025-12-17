@@ -40,8 +40,8 @@ export const NAVIS_PATHS = /** @type {const} */ ({
     revoke: (id) => `/devices/${encodeURIComponent(id)}/revoke`,
   },
   discovery: {
-    scan: '/discovery/scan',
-    index: '/discovery/index',
+    scan: '/api/discovery/scan',
+    index: '/api/discovery/index',
   },
 })
 
