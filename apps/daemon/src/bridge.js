@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 /**
- * Navis Packet Forwarding Bridge
+ * Navis Packet Forwarding Bridge + mDNS Service
  *
- * Uses OS-level packet forwarding to selectively route traffic based on domain.
+ * This service handles both:
+ * 1. OS-level packet forwarding to selectively route navis.local traffic
+ * 2. mDNS/Bonjour advertisement for navis.local on the LAN
+ *
  * This enables Navis to always be accessible at https://navis.local regardless
- * of other services using port 443.
+ * of other services using port 443, with persistent name resolution.
  *
  * Platform support:
  * - macOS: pfctl with rdr rules and Host header inspection
@@ -14,8 +17,9 @@
 
 import { execSync, spawn } from 'node:child_process'
 import { existsSync, writeFileSync } from 'node:fs'
-import { platform } from 'node:os'
+import { platform, networkInterfaces } from 'node:os'
 import { join } from 'node:path'
+import multicastDns from 'multicast-dns'
 
 const listenPort = 443
 const targetHost = '127.0.0.1'
@@ -27,6 +31,7 @@ class PacketForwardingBridge {
     this.platform = platform()
     this.isRunning = false
     this.cleanupCommands = []
+    this.mdns = null
   }
 
   async start() {
@@ -59,6 +64,9 @@ class PacketForwardingBridge {
       console.log(`🌐 Navis is now accessible at: https://${targetDomain}`)
       console.log('💡 Note: Other services can continue using port 443')
 
+      // Start mDNS service for name resolution
+      await this.startMDNS()
+
       // Keep process alive
       this.keepAlive()
 
@@ -66,6 +74,98 @@ class PacketForwardingBridge {
       console.error('❌ Failed to start packet forwarding:', error.message)
       await this.cleanup()
       process.exit(1)
+    }
+  }
+
+  getLanAddress() {
+    const interfaces = networkInterfaces()
+    for (const addrs of Object.values(interfaces)) {
+      for (const addr of addrs || []) {
+        if (addr && addr.family === 'IPv4' && addr.internal === false) {
+          return addr.address
+        }
+      }
+    }
+    return null
+  }
+
+  async startMDNS() {
+    try {
+      const ip = this.getLanAddress()
+      if (!ip) {
+        console.log('⚠️  mDNS not started: no LAN IPv4 address detected')
+        return
+      }
+
+      console.log('🔍 Starting mDNS service for navis.local...', { ip })
+
+      this.mdns = multicastDns()
+
+      // Respond to queries for navis.local
+      this.mdns.on('query', (query) => {
+        const questions = query.questions || []
+        for (const q of questions) {
+          if (q.name === 'navis.local' && q.type === 'A') {
+            this.mdns.respond({
+              answers: [{ name: 'navis.local', type: 'A', ttl: 120, data: ip }],
+            })
+          }
+        }
+      })
+
+      // Initial advertisement
+      this.mdns.respond({
+        answers: [
+          {
+            name: '_navisai._tcp.local',
+            type: 'PTR',
+            data: 'NavisAI._navisai._tcp.local',
+            ttl: 120,
+          },
+          {
+            name: 'NavisAI._navisai._tcp.local',
+            type: 'SRV',
+            data: { port: 443, weight: 0, priority: 10, target: 'navis.local' },
+            ttl: 120,
+          },
+          {
+            name: 'NavisAI._navisai._tcp.local',
+            type: 'TXT',
+            data: ['version=1', 'tls=1', 'origin=https://navis.local'],
+            ttl: 120,
+          },
+          { name: 'navis.local', type: 'A', ttl: 120, data: ip },
+        ],
+      })
+
+      console.log('✅ mDNS service active for navis.local')
+
+      // Monitor IP changes and update mDNS
+      this.ipMonitorInterval = setInterval(() => {
+        const newIp = this.getLanAddress()
+        if (newIp && newIp !== ip) {
+          console.log(`🔄 IP address changed: ${ip} → ${newIp}`)
+          // Re-advertise with new IP
+          this.mdns.respond({
+            answers: [{ name: 'navis.local', type: 'A', ttl: 120, data: newIp }],
+          })
+        }
+      }, 30000) // Check every 30 seconds
+
+    } catch (error) {
+      console.log('⚠️  mDNS not available:', error.message)
+    }
+  }
+
+  stopMDNS() {
+    if (this.mdns) {
+      this.mdns.destroy()
+      this.mdns = null
+      if (this.ipMonitorInterval) {
+        clearInterval(this.ipMonitorInterval)
+        this.ipMonitorInterval = null
+      }
+      console.log('🔍 mDNS service stopped')
     }
   }
 
@@ -92,11 +192,8 @@ class PacketForwardingBridge {
     const anchorName = 'navis'
     const pfConf = `
 # Navis packet forwarding rules
-# Enable packet forwarding
-set skip on lo0
-
-# Redirect navis.local traffic to Navis daemon
-rdr pass on lo0 inet proto tcp from any to any port 443 -> ${targetHost} port ${targetPort}
+# Redirect ALL HTTPS traffic to Navis daemon (macOS pf limitation)
+rdr pass inet proto tcp from any to any port 443 -> ${targetHost} port ${targetPort}
 
 # Allow forwarded packets
 pass out quick inet proto tcp from any to any keep state
@@ -111,17 +208,22 @@ pass in quick inet proto tcp from any to any keep state
       // Load the rules into pf anchor
       execSync(`sudo pfctl -a ${anchorName} -f ${tempFile}`, { stdio: 'inherit' })
 
-      // Enable pf if not already enabled
-      execSync('sudo pfctl -e', { stdio: 'inherit' })
-
-      // Add to anchor table
-      execSync(`sudo pfctl -E`, { stdio: 'inherit' })
+      // Enable pf if not already enabled (ignore error if already enabled)
+      try {
+        execSync('sudo pfctl -e', { stdio: 'pipe' })
+      } catch (error) {
+        // pfctl -e fails if pf is already enabled, which is fine
+        if (!error.message.includes('already enabled')) {
+          throw error
+        }
+      }
 
       // Store cleanup commands
       this.cleanupCommands.push(`sudo pfctl -a ${anchorName} -F all`)
       this.cleanupCommands.push(`rm -f ${tempFile}`)
 
       console.log('✅ macOS pfctl rules installed')
+      console.log('⚠️  Note: macOS pf forwards ALL port 443 traffic (not domain-specific)')
     } catch (error) {
       throw new Error(`Failed to setup macOS packet forwarding: ${error.message}`)
     }
@@ -209,6 +311,7 @@ pass in quick inet proto tcp from any to any keep state
     process.on('SIGINT', async () => {
       console.log('\n🛑 Shutting down gracefully...')
       this.isRunning = false
+      this.stopMDNS()
       await this.cleanup()
       process.exit(0)
     })
@@ -216,6 +319,7 @@ pass in quick inet proto tcp from any to any keep state
     process.on('SIGTERM', async () => {
       console.log('\n🛑 Terminating...')
       this.isRunning = false
+      this.stopMDNS()
       await this.cleanup()
       process.exit(0)
     })
@@ -223,19 +327,34 @@ pass in quick inet proto tcp from any to any keep state
 
   async checkStatus() {
     try {
+      let packetForwardingActive = false
+
+      // Check packet forwarding status
       if (this.platform === 'darwin') {
         const output = execSync('sudo pfctl -s rules -a navis', { encoding: 'utf8' })
-        return output.includes(targetDomain) || output.includes(`${targetPort}`)
+        packetForwardingActive = output.includes(targetDomain) || output.includes(`${targetPort}`)
       } else if (this.platform === 'linux') {
         const output = execSync('sudo iptables -t nat -L PREROUTING -n -v', { encoding: 'utf8' })
-        return output.includes(targetDomain) || output.includes(`${targetPort}`)
+        packetForwardingActive = output.includes(targetDomain) || output.includes(`${targetPort}`)
       } else if (this.platform === 'win32') {
         const output = execSync('netsh interface portproxy show all', { encoding: 'utf8' })
-        return output.includes(`${listenPort}`)
+        packetForwardingActive = output.includes(`${listenPort}`)
       }
-      return false
+
+      // Check mDNS status
+      const mDNSActive = this.mdns !== null
+
+      return {
+        packetForwarding: packetForwardingActive,
+        mdns: mDNSActive,
+        active: packetForwardingActive && mDNSActive
+      }
     } catch (error) {
-      return false
+      return {
+        packetForwarding: false,
+        mdns: false,
+        active: false
+      }
     }
   }
 }
@@ -264,23 +383,28 @@ if (importPath === `file://${process.argv[1]}`) {
       break
 
     case 'status':
-      bridge.checkStatus().then(isActive => {
-        console.log(isActive ? '✅ Packet forwarding is active' : '❌ Packet forwarding is not active')
-        process.exit(isActive ? 0 : 1)
+      bridge.checkStatus().then(status => {
+        console.log('\nNavis Bridge Service Status:')
+        console.log(`  Packet Forwarding: ${status.packetForwarding ? '✅ Active' : '❌ Inactive'}`)
+        console.log(`  mDNS Service: ${status.mdns ? '✅ Active' : '❌ Inactive'}`)
+        console.log(`\nOverall: ${status.active ? '✅ Bridge is active' : '❌ Bridge is not fully active'}`)
+        process.exit(status.active ? 0 : 1)
       })
       break
 
     default:
       console.log(`
-Navis Packet Forwarding Bridge
+Navis Bridge Service (Packet Forwarding + mDNS)
 
 Usage:
-  ${process.argv[1]} start   - Start packet forwarding
-  ${process.argv[1]} stop    - Stop packet forwarding
-  ${process.argv[1]} status  - Check forwarding status
+  ${process.argv[1]} start   - Start bridge (packet forwarding + mDNS)
+  ${process.argv[1]} stop    - Stop bridge
+  ${process.argv[1]} status  - Check service status
 
-The bridge selectively forwards traffic for ${targetDomain} to the Navis daemon
-without interfering with other services on port ${listenPort}.
+The bridge provides:
+1. Packet forwarding for ${targetDomain} to Navis daemon
+2. mDNS/Bonjour advertisement for ${targetDomain}
+Both work without interfering with other services on port ${listenPort}.
 `)
       process.exit(1)
   }

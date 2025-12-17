@@ -12,9 +12,8 @@ import rateLimit from '@fastify/rate-limit'
 import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
-import { homedir, networkInterfaces } from 'node:os'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import multicastDns from 'multicast-dns'
 import fastifyStatic from '@fastify/static'
 import { NAVIS_PATHS } from '@navisai/api-contracts'
 import dbManager from '@navisai/db'
@@ -98,21 +97,10 @@ export class NavisDaemon {
     this.pairingService = null
     this.bleAdvertiser = null
 
-    // mDNS responder
-    this.mdns = null
+
   }
 
-  getLanAddress() {
-    const interfaces = networkInterfaces()
-    for (const addrs of Object.values(interfaces)) {
-      for (const addr of addrs || []) {
-        if (addr && addr.family === 'IPv4' && addr.internal === false) {
-          return addr.address
-        }
-      }
-    }
-    return null
-  }
+
 
   setupLogCapture() {
     // Override console methods to capture logs
@@ -260,10 +248,7 @@ export class NavisDaemon {
       // Start the server
       await this.fastify.listen({ port, host })
 
-      // Setup mDNS if enabled
-      if (this.config.get('discovery.mdns')) {
-        await this.setupMDNS()
-      }
+      // Note: mDNS is now handled by the bridge service
 
       // Optional BLE onboarding signal (only when unpaired)
       try {
@@ -403,57 +388,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
     }
   }
 
-  async setupMDNS() {
-    try {
-      const ip = this.getLanAddress()
-      if (!ip) {
-        console.log('⚠️  mDNS not started: no LAN IPv4 address detected')
-        return
-      }
 
-      const port = 443
-      this.mdns = multicastDns()
-
-      this.mdns.on('query', (query) => {
-        const questions = query.questions || []
-        for (const q of questions) {
-          if (q.name === 'navis.local' && q.type === 'A') {
-            this.mdns.respond({
-              answers: [{ name: 'navis.local', type: 'A', ttl: 120, data: ip }],
-            })
-          }
-        }
-      })
-
-      this.mdns.respond({
-        answers: [
-          {
-            name: '_navisai._tcp.local',
-            type: 'PTR',
-            data: 'NavisAI._navisai._tcp.local',
-            ttl: 120,
-          },
-          {
-            name: 'NavisAI._navisai._tcp.local',
-            type: 'SRV',
-            data: { port, weight: 0, priority: 10, target: 'navis.local' },
-            ttl: 120,
-          },
-          {
-            name: 'NavisAI._navisai._tcp.local',
-            type: 'TXT',
-            data: ['version=1', 'tls=1', 'origin=https://navis.local'],
-            ttl: 120,
-          },
-          { name: 'navis.local', type: 'A', ttl: 120, data: ip },
-        ],
-      })
-
-      console.log('🔍 mDNS active for navis.local', { ip })
-    } catch (error) {
-      console.log('⚠️  mDNS not available:', error.message)
-    }
-  }
 
   // Route handlers
   async getStatusHandler(request, reply) {
@@ -651,6 +586,23 @@ pnpm --filter @navisai/daemon dev</code></pre>
     // Clean up on disconnect
     request.raw.on('close', () => {
       clearInterval(heartbeat)
+      // Remove client from log store (handled by logStore.addClient)
+    })
+
+    // Also forward logs directly from logStore events for real-time streaming
+    const onLog = (log) => {
+      try {
+        reply.raw.write(`data: ${JSON.stringify(log)}\n\n`)
+      } catch (error) {
+        // Client disconnected
+        clearInterval(heartbeat)
+      }
+    }
+
+    logStore.on('log', onLog)
+
+    request.raw.on('close', () => {
+      logStore.off('log', onLog)
     })
   }
 
@@ -673,10 +625,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
   async stop() {
     console.log('\n🛑 Stopping Navis daemon...')
 
-    if (this.mdns) {
-      this.mdns.destroy()
-      this.mdns = null
-    }
+    // Note: mDNS is now handled by the bridge service
 
     await this.bleAdvertiser?.stop?.()
 

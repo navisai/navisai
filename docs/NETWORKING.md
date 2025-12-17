@@ -66,6 +66,7 @@ Implementation note:
 - Packet forwarding rules are installed with OS-specific tools (pfctl, iptables, netsh).
 - Rules are added with priority based on packet inspection (Host header matching).
 - No service needs to "bind" port 443 exclusively - the OS handles routing at packet layer.
+- See [DOMAIN_BASED_FORWARDING_DESIGN.md](./DOMAIN_BASED_FORWARDING_DESIGN.md) for detailed technical implementation.
 
 ### 3.3 mDNS/Bonjour (LAN name resolution + discovery)
 
@@ -125,21 +126,28 @@ Since packet forwarding operates at the network layer:
 # Enable forwarding
 sudo sysctl -w net.inet.ip.forwarding=1
 
-# Add rule for navis.local
+# NOTE: pfctl has limitations for Host header inspection in rdr rules
+# The simple rule below forwards ALL port 443 traffic, not just navis.local
+# Proper domain-based forwarding requires advanced pf techniques (see navisai-a1p)
 echo "rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port 47621" | sudo pfctl -a navis -f -
 ```
 
 **Linux**:
 ```bash
-# Forward navis.local traffic
+# Forward navis.local traffic (proper domain-based filtering)
 sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -m string --string "Host: navis.local" -j DNAT --to-destination 127.0.0.1:47621
 ```
 
 **Windows**:
 ```cmd
-# Forward all 443 traffic (limited by Windows)
+# Forward all 443 traffic (Windows limitation - cannot filter by domain)
 netsh interface portproxy add v4tov4 listenport=443 listenaddress=0.0.0.0 connectport=47621 connectaddress=127.0.0.1
 ```
+
+**Important Implementation Notes**:
+- **macOS pf limitations**: pf's rdr rules cannot inspect Host headers natively, making true domain-based forwarding challenging. The current implementation forwards all port 443 traffic. See issue [navisai-a1p] for implementing proper domain-based forwarding using advanced pf techniques or transparent proxying.
+- **Linux**: Properly implements domain-based forwarding using string matching on the Host header.
+- **Windows**: netsh portproxy cannot filter by domain and forwards all port 443 traffic - this is a known Windows limitation.
 
 ---
 

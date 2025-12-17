@@ -43,9 +43,16 @@ export class LogStore extends EventEmitter {
       this.sendToClient(res, log)
     })
 
+    // Listen for new logs and forward to this client
+    const onLog = (log) => {
+      this.sendToClient(res, log)
+    }
+    this.on('log', onLog)
+
     // Handle client disconnect
     res.on('close', () => {
       this.clients.delete(res)
+      this.off('log', onLog)
     })
   }
 

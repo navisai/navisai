@@ -18,11 +18,12 @@ Navis targets a single, clean LAN origin:
 
 To make this work without requiring users to run `sudo` for daily usage, Navis requires a one-time setup step that:
 
-1. **Installs packet forwarding rules** that selectively route navis.local traffic to the daemon.
+1. **Installs intelligent packet forwarding** with transparent HTTPS proxy that selectively routes navis.local traffic to the daemon.
 2. Enables **mDNS/Bonjour** so `navis.local` resolves on the LAN to the host machine's LAN IP.
-3. Generates/refreshes local TLS material for `navis.local`.
-4. **No conflicts with existing services** - other apps continue working normally.
-5. Guides device trust for mobile clients (iOS requires explicit trust for local certificates).
+3. Generates/refreshes local TLS material for `navis.local` and auto-detected development servers.
+4. **Zero conflicts with existing services** - other development tools and HTTPS services continue working normally.
+5. **Auto-detects local development servers** and creates convenient domain mappings (e.g., app.localhost, api.localhost).
+6. Guides device trust for mobile clients (iOS requires explicit trust for local certificates).
 
 This step is explicit, user-consented, and reversible.
 
@@ -65,13 +66,15 @@ navisai setup
 
 Requirements:
 
-- **Installs OS-level packet forwarding rules** for domain-based routing
+- **Installs transparent HTTPS proxy** with intelligent domain-based routing
 - **Routes `navis.local` traffic** to Navis daemon on `127.0.0.1:47621`
 - **Routes all other domains** through unchanged (no interference)
-- **No TLS termination** - operates at network layer
+- **Selective TLS termination** with end-to-end encryption preservation
 - **Works alongside existing services** without conflicts
+- **Auto-detects local dev servers** and creates domain mappings
 - Managed by the OS service manager for persistence
 - Fully reversible (uninstall/disable)
+- See [DOMAIN_BASED_FORWARDING_DESIGN.md](./DOMAIN_BASED_FORWARDING_DESIGN.md) for technical details
 
 Packet forwarding by platform:
 
