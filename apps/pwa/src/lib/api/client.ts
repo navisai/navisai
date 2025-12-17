@@ -257,7 +257,30 @@ class ApiClient {
   }
 
   async getProjectAnalysis(path: string, refresh = false): Promise<Project> {
-    throw new Error('Not implemented')
+    // Refs: navisai-sz8 (project analysis implementation)
+    const url = new URL(`${this.baseURL}/api/discovery/index`, window.location.origin)
+    const body = JSON.stringify({ paths: [path], refresh })
+
+    const response = await this.request('POST', url.pathname + url.search, {
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => null)
+      throw new Error(error?.error || `HTTP ${response.status}`)
+    }
+
+    const result = await response.json()
+
+    // Return the analysis for the requested path
+    return result.results?.[0] || {
+      path,
+      success: false,
+      error: 'Analysis failed'
+    }
   }
 
   async startPairing(payload: {

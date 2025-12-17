@@ -616,16 +616,55 @@ export async function doctorCommand() {
     allGood = false
   }
 
-  // Bridge status (best-effort)
+  // Bridge status and packet forwarding tests (Refs: navisai-lss)
   try {
     if (os === 'darwin') {
+      // Check launchd service
       await execAsync('launchctl print system/com.navisai.bridge >/dev/null 2>&1')
       console.log('✅ Bridge: launchd service installed (com.navisai.bridge)')
+
+      // Test packet forwarding rules
+      try {
+        const { stdout } = await execAsync('sudo pfctl -a navisai -s nat 2>/dev/null || echo "no rules"')
+        if (stdout.includes('rdr') && stdout.includes('443') && stdout.includes('127.0.0.1')) {
+          console.log('✅ Packet forwarding: NAT rules configured for 443 → loopback')
+        } else {
+          console.log('⚠️  Packet forwarding: NAT rules not found or incomplete')
+          allGood = false
+        }
+      } catch (error) {
+        console.log('⚠️  Packet forwarding: Cannot check pfctl rules (may need sudo)')
+        allGood = false
+      }
+
+      // Test if proxy is listening
+      try {
+        await execAsync('lsof -i :8443 -sTCP:LISTEN -n -P | grep -q "LISTEN"')
+        console.log('✅ Transparent proxy: Listening on port 8443')
+      } catch (error) {
+        console.log('⚠️  Transparent proxy: Not listening on port 8443')
+        allGood = false
+      }
+
     } else if (os === 'linux') {
       const { stdout } = await execAsync('systemctl is-active navisai-bridge.service || true')
       const status = stdout.trim()
       if (status === 'active') {
         console.log('✅ Bridge: systemd service active (navisai-bridge.service)')
+
+        // Test iptables rules
+        try {
+          const { stdout: rules } = await execAsync('sudo iptables -t nat -L PREROUTING -n 2>/dev/null | grep navis || echo "no rules"')
+          if (rules.includes('443') && rules.includes('8443')) {
+            console.log('✅ Packet forwarding: iptables NAT rules configured')
+          } else {
+            console.log('⚠️  Packet forwarding: iptables NAT rules not found')
+            allGood = false
+          }
+        } catch (error) {
+          console.log('⚠️  Packet forwarding: Cannot check iptables rules (may need sudo)')
+          allGood = false
+        }
       } else {
         console.log(`⚠️  Bridge: systemd service not active (${status || 'unknown'})`)
         allGood = false
@@ -635,6 +674,20 @@ export async function doctorCommand() {
         const { stdout } = await execAsync('sc query navisai-bridge')
         if (stdout.includes('RUNNING')) {
           console.log('✅ Bridge: Windows service active (navisai-bridge)')
+
+          // Check netsh port forwarding
+          try {
+            const { stdout: netsh } = await execAsync('netsh interface portproxy show all | findstr "443"')
+            if (netsh.includes('navisai')) {
+              console.log('✅ Packet forwarding: netsh portproxy rules configured')
+            } else {
+              console.log('⚠️  Packet forwarding: netsh portproxy rules not found')
+              allGood = false
+            }
+          } catch (error) {
+            console.log('⚠️  Packet forwarding: Cannot check netsh rules')
+            allGood = false
+          }
         } else {
           console.log('⚠️  Bridge: Windows service installed but not running')
           allGood = false

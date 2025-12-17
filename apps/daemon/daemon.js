@@ -301,10 +301,6 @@ export class NavisDaemon {
   }
 
   async setupRoutes() {
-    // Add authentication middleware
-    const authMiddleware = createAuthMiddleware(this.dbManager)
-    this.fastify.addHook('preHandler', authMiddleware)
-
     // Public endpoints (no auth required)
     this.fastify.get(NAVIS_PATHS.status, this.getStatusHandler.bind(this))
     this.fastify.get(NAVIS_PATHS.certs.navisLocalCrt, this.getCertHandler.bind(this))
@@ -317,30 +313,67 @@ export class NavisDaemon {
       this.pairingService.handleRequest.bind(this.pairingService)
     )
 
-    // Auth-required endpoints (will add middleware)
-    this.fastify.get(NAVIS_PATHS.projects.list, this.getProjectsHandler.bind(this))
-    this.fastify.get('/projects/:id', this.getProjectHandler.bind(this))
-    this.fastify.get(NAVIS_PATHS.sessions, this.getSessionsHandler.bind(this))
-    this.fastify.get(NAVIS_PATHS.approvals.list, this.getApprovalsHandler.bind(this))
-    this.fastify.get(NAVIS_PATHS.approvals.pending, this.getPendingApprovalsHandler.bind(this))
-    this.fastify.get('/approvals/:id', this.getApprovalHandler.bind(this))
-    this.fastify.post('/approvals/:id/approve', this.approveHandler.bind(this))
-    this.fastify.post('/approvals/:id/reject', this.rejectHandler.bind(this))
+    // Auth-required endpoints - Add authentication middleware
+    const authMiddleware = createAuthMiddleware(this.dbManager)
+
+    // Projects endpoints
+    this.fastify.get(NAVIS_PATHS.projects.list, {
+      preHandler: authMiddleware
+    }, this.getProjectsHandler.bind(this))
+    this.fastify.get('/projects/:id', {
+      preHandler: authMiddleware
+    }, this.getProjectHandler.bind(this))
+
+    // Sessions endpoints
+    this.fastify.get(NAVIS_PATHS.sessions, {
+      preHandler: authMiddleware
+    }, this.getSessionsHandler.bind(this))
+
+    // Approvals endpoints
+    this.fastify.get(NAVIS_PATHS.approvals.list, {
+      preHandler: authMiddleware
+    }, this.getApprovalsHandler.bind(this))
+    this.fastify.get(NAVIS_PATHS.approvals.pending, {
+      preHandler: authMiddleware
+    }, this.getPendingApprovalsHandler.bind(this))
+    this.fastify.get('/approvals/:id', {
+      preHandler: authMiddleware
+    }, this.getApprovalHandler.bind(this))
+    this.fastify.post('/approvals/:id/approve', {
+      preHandler: authMiddleware
+    }, this.approveHandler.bind(this))
+    this.fastify.post('/approvals/:id/reject', {
+      preHandler: authMiddleware
+    }, this.rejectHandler.bind(this))
 
     // Device management
-    this.fastify.get(NAVIS_PATHS.devices.list, this.getDevicesHandler.bind(this))
-    this.fastify.post('/devices/:id/revoke', this.revokeDeviceHandler.bind(this))
+    this.fastify.get(NAVIS_PATHS.devices.list, {
+      preHandler: authMiddleware
+    }, this.getDevicesHandler.bind(this))
+    this.fastify.post('/devices/:id/revoke', {
+      preHandler: authMiddleware
+    }, this.revokeDeviceHandler.bind(this))
 
     // Discovery endpoints
-    this.fastify.post(NAVIS_PATHS.discovery.scan, this.scanHandler.bind(this))
-    this.fastify.post(NAVIS_PATHS.discovery.index, this.indexHandler.bind(this))
+    this.fastify.post(NAVIS_PATHS.discovery.scan, {
+      preHandler: authMiddleware
+    }, this.scanHandler.bind(this))
+    this.fastify.post(NAVIS_PATHS.discovery.index, {
+      preHandler: authMiddleware
+    }, this.indexHandler.bind(this))
 
     // Logs endpoints
-    this.fastify.get('/logs', this.getLogsHandler.bind(this))
-    this.fastify.get('/logs/stream', this.getLogStreamHandler.bind(this))
+    this.fastify.get('/logs', {
+      preHandler: authMiddleware
+    }, this.getLogsHandler.bind(this))
+    this.fastify.get('/logs/stream', {
+      preHandler: authMiddleware
+    }, this.getLogStreamHandler.bind(this))
 
     // Pairing QR endpoint
-    this.fastify.get('/pairing/qr', this.getPairingQRHandler.bind(this))
+    this.fastify.get('/pairing/qr', {
+      preHandler: authMiddleware
+    }, this.getPairingQRHandler.bind(this))
 
     const pwaRoot = join(__dirname, '..', 'pwa', 'build')
     const pwaIndex = join(pwaRoot, 'index.html')
@@ -415,7 +448,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async getProjectsHandler(request, reply) {
-    // TODO: Add auth middleware
+    // Refs: navisai-0f0 (authentication middleware applied)
     if (!this.projectService) {
       return { projects: [] }
     }
@@ -423,7 +456,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async getProjectHandler(request, reply) {
-    // TODO: Add auth middleware
+    // Refs: navisai-0f0 (authentication middleware applied)
     const { id } = request.params
     if (!this.projectService) {
       reply.code(404)
@@ -433,7 +466,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async getSessionsHandler(request, reply) {
-    // TODO: Add auth middleware
+    // Refs: navisai-0f0 (authentication middleware applied)
     if (!this.sessionService) {
       return { sessions: [] }
     }
@@ -441,30 +474,15 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async getApprovalsHandler(request, reply) {
-    // TODO: Add auth middleware
+    // Refs: navisai-0f0 (authentication middleware applied)
     if (!this.approvalService) {
       return { approvals: [] }
     }
     return await this.approvalService.listApprovals()
   }
 
-  async getApprovalHandler(request, reply) {
-    if (!this.approvalService) {
-      reply.code(404)
-      return { error: 'Approval not found' }
-    }
-    const { id } = request.params
-    try {
-      const approval = await this.approvalService.getApproval(id)
-      return approval
-    } catch {
-      reply.code(404)
-      return { error: 'Approval not found' }
-    }
-  }
-
   async getPendingApprovalsHandler(request, reply) {
-    // TODO: Add auth middleware
+    // Refs: navisai-0f0 (authentication middleware applied)
     if (!this.approvalService) {
       return { approvals: [] }
     }
@@ -475,7 +493,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async approveHandler(request, reply) {
-    // TODO: Add auth middleware
+    // Refs: navisai-0f0 (authentication middleware applied)
     const { id } = request.params
     if (!this.approvalService) {
       reply.code(404)
@@ -487,7 +505,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async rejectHandler(request, reply) {
-    // TODO: Add auth middleware
+    // Refs: navisai-0f0 (authentication middleware applied)
     const { id } = request.params
     if (!this.approvalService) {
       reply.code(404)
@@ -499,7 +517,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async getDevicesHandler(request, reply) {
-    // TODO: Add auth middleware
+    // Refs: navisai-0f0 (authentication middleware applied)
     if (!this.pairingService) {
       return { devices: [] }
     }
@@ -507,7 +525,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async revokeDeviceHandler(request, reply) {
-    // TODO: Add auth middleware
+    // Refs: navisai-0f0 (authentication middleware applied)
     const { id } = request.params
     if (!this.pairingService) {
       reply.code(404)
@@ -517,7 +535,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async scanHandler(request, reply) {
-    // TODO: Add auth middleware and implement scan
+    // Refs: navisai-4oi (discovery endpoint implementation needed)
     const { path, options } = request.body
     return {
       scannedPath: path,
@@ -527,7 +545,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
   }
 
   async indexHandler(request, reply) {
-    // TODO: Add auth middleware and implement indexing
+    // Refs: navisai-4oi (discovery endpoint implementation needed)
     const { paths } = request.body
     return {
       total: paths.length,
