@@ -121,13 +121,15 @@ export class PairingService {
       this.pendingApprovals.set(approval.id, { resolve, reject, pairingToken, clientName })
     })
 
+    let timeoutId = null
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error('PAIRING_TIMEOUT'))
+      }, 2 * 60 * 1000)
+    })
+
     try {
-      const result = await Promise.race([
-        waitForResolution,
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('PAIRING_TIMEOUT')), 2 * 60 * 1000)
-        ),
-      ])
+      const result = await Promise.race([waitForResolution, timeoutPromise])
 
       return result
     } catch (error) {
@@ -138,6 +140,10 @@ export class PairingService {
       }
       reply.code(error?.message === 'PAIRING_TIMEOUT' ? 408 : 500)
       return { error: 'Pairing request timed out or failed' }
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
     }
   }
 
