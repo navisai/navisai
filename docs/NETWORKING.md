@@ -49,7 +49,12 @@ Setup details: see `SETUP.md`.
 - **Domain-based forwarding**:
   - Traffic for `navis.local` → forwarded to daemon on `127.0.0.1:47621`
   - Traffic for all other domains → passes through to existing services
-- **No TLS termination** - packets are forwarded transparently at network level.
+- **Coexistence contract (dev-friendly)**:
+  - The bridge may redirect all `:443` traffic into a local transparent proxy for inspection.
+  - The proxy **MUST NOT** break other HTTPS services (e.g., ServBay).
+  - The proxy **MUST NOT** terminate TLS for non‑Navis domains; it must pass through bytes to the original destination so the client sees the original peer certificate.
+  - Only `navis.local` (and any explicitly configured Navis-owned domains) may be terminated/served by Navis.
+  - Refs: navisai-288, navisai-ms0
 - **Always available**: Navis is accessible at `https://navis.local` regardless of other services.
 - **Packet-level routing**:
   - macOS: pfctl with rdr rules based on Host header
@@ -119,6 +124,8 @@ Since packet forwarding operates at the network layer:
 - Domain (`navis.local`) determines routing, not port exclusivity
 - No need for port number juggling or complex conflict resolution
 
+If a non‑Navis local HTTPS service starts showing “Not secure” after setup, treat it as a regression: Navis is likely presenting an untrusted certificate for a non‑Navis domain, which violates the coexistence contract (Refs: navisai-288).
+
 ### 5.2 Implementation by Platform
 
 **macOS**:
@@ -132,7 +139,7 @@ echo "rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port 
 
 # The transparent proxy inspects TLS SNI and routes:
 # - navis.local → 127.0.0.1:47621 (NavisAI daemon)
-# - other domains → original destinations
+# - other domains → original destinations (passthrough, no MITM)
 ```
 
 **Linux**:

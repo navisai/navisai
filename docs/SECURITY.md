@@ -49,6 +49,14 @@ Packet forwarding introduces specific security considerations:
 - All other domains pass through unchanged to existing services
 - Host header inspection prevents cross-domain attacks
 
+### 5.1.1 TLS Coexistence and Trust Preservation
+
+Navis must not degrade the trust posture of other local HTTPS services:
+- For non‑Navis domains, the client must see the original server certificate (no MITM).
+- If the bridge/proxy ever presents a Navis-signed certificate for a non‑Navis domain, browsers will flag those sites as insecure; this is a regression.
+
+Refs: navisai-288, navisai-ms0
+
 ### 5.2 OS-Level Security
 - Packet forwarding rules require administrator privileges for installation
 - Rules are installed in dedicated anchors/namespaces to avoid conflicts

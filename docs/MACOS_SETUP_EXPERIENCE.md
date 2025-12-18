@@ -121,6 +121,17 @@ Goal: clean removal without disrupting user's development setup.
 - `https://navis.local` → Navis daemon (port 443 forwarded to 47621)
 - `https://other-domain.local` → Passes through unchanged
 
+### 4.1.1 Trust Preservation (Developer Tools)
+
+If the user has existing local HTTPS tooling (e.g., ServBay), Navis must not cause those sites to become “Not secure”.
+
+Setup UX must communicate (and implementation must guarantee):
+- Navis only “owns” `navis.local`.
+- Other hostnames keep their existing TLS certificates (no TLS MITM).
+- If a dev tool shows as insecure after setup, provide a guided “Disable bridge → verify → re-enable after fix” flow.
+
+Refs: navisai-288, navisai-ms0
+
 ### 4.2 Benefits of packet forwarding
 - **No port exclusivity** - multiple services can use port 443
 - **Domain-based separation** - navis.local always goes to Navis

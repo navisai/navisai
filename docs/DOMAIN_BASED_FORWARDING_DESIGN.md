@@ -18,6 +18,15 @@ The current packet forwarding implementation uses macOS `pfctl` to redirect ALL 
 
 This approach forces developers to choose between NavisAI and their existing tools, breaking the seamless local development experience.
 
+### Coexistence Requirement (Non-Negotiable)
+
+To preserve trust and developer UX, domain-based forwarding must ensure:
+- `navis.local` is served by Navis (and may terminate TLS for Navis-owned domains only).
+- Any non‑Navis domain (e.g., ServBay sites) must retain its original TLS certificate at the client.
+- Therefore, for non‑Navis SNI, the proxy must operate as a **TCP passthrough**, not a TLS MITM.
+
+Refs: navisai-288, navisai-ms0
+
 ## Solution Overview
 
 We implement a transparent HTTPS proxy that:
@@ -49,13 +58,12 @@ We implement a transparent HTTPS proxy that:
 ### Data Flow
 
 1. **Client Connection**: Client initiates HTTPS connection to any domain on port 443
-2. **TLS Interception**: Proxy intercepts connection and performs TLS handshake
+2. **SNI Inspection**: Proxy inspects ClientHello to read SNI (without committing to TLS termination for non‑Navis domains)
 3. **SNI Inspection**: Proxy reads Server Name Indication (SNI) from Client Hello
 4. **Routing Decision**:
    - If SNI == `navis.local` → Route to NavisAI daemon
-   - Else → Route to original destination
-5. **Connection Bridging**: Proxy establishes TLS connection to destination
-6. **Data Relay**: Bidirectional relay of encrypted data
+   - Else → Route to original destination with TCP passthrough (no TLS termination)
+5. **Data Relay**: Bidirectional relay of bytes
 
 ## Technical Implementation
 
