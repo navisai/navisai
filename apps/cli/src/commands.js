@@ -54,6 +54,45 @@ async function resolveNavisLocal() {
   }
 }
 
+async function queryMdnsARecord(hostname) {
+  if (!(await hasCommand('dns-sd'))) {
+    return { success: false, error: 'dns-sd not available' }
+  }
+
+  try {
+    const { stdout } = await execAsync(
+      `perl -e 'alarm 3; exec "dns-sd", "-Q", "${hostname}", "A"' 2>/dev/null || true`,
+      { encoding: 'utf8' }
+    )
+    const line = stdout
+      .split('\n')
+      .find((row) => row.includes(`${hostname}.`) && row.includes('Addr') && row.trim().match(/\d+\.\d+\.\d+\.\d+/))
+    const ip = line?.trim().match(/(\d+\.\d+\.\d+\.\d+)/)?.[1]
+    if (!ip) return { success: false, error: `No mDNS A answer observed for ${hostname}` }
+    return { success: true, address: ip }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
+async function browseMdnsService(serviceType, domain = 'local') {
+  if (!(await hasCommand('dns-sd'))) {
+    return { success: false, error: 'dns-sd not available' }
+  }
+
+  try {
+    const { stdout } = await execAsync(
+      `perl -e 'alarm 3; exec "dns-sd", "-B", "${serviceType}", "${domain}"' 2>/dev/null || true`,
+      { encoding: 'utf8' }
+    )
+    const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+    const found = lines.some((l) => l.includes(serviceType))
+    return { success: true, found, output: lines.slice(0, 8).join('\n') }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
 async function checkTlsCertificate() {
   try {
     const pem = await fs.readFile(CERT_PATH, 'utf8')
@@ -742,6 +781,10 @@ export async function doctorCommand() {
   console.log('\n🌐 Network & mDNS Diagnostics:')
   const lanAddresses = getLanAddresses()
   console.log(`   LAN addresses: ${lanAddresses.length > 0 ? lanAddresses.join(', ') : 'none detected'}`)
+  const preferredIPv4 = lanAddresses.find((addr) => addr.includes('.') && !addr.startsWith('127.'))
+  if (preferredIPv4) {
+    console.log(`   Phone test (IP): https://${preferredIPv4}${NAVIS_PATHS.status} (expected cert warning; bypass to confirm reachability)`)
+  }
 
   // Check if bridge is advertising mDNS
   let bridgeMdnsActive = false
@@ -780,9 +823,27 @@ export async function doctorCommand() {
     allGood = false
   }
 
+  // Directly query mDNS to catch "router blocks multicast between clients" issues (Refs: navisai-jsh)
+  const mdnsQuery = await queryMdnsARecord('navis.local')
+  if (mdnsQuery.success) {
+    console.log(`✅ mDNS query: navis.local A -> ${mdnsQuery.address}`)
+  } else {
+    console.log(`⚠️  mDNS query: ${mdnsQuery.error}`)
+    console.log('   💡 If IP access works but navis.local does not on a phone, your LAN may block Bonjour/mDNS between clients.')
+  }
+
+  const navisService = await browseMdnsService('_navisai._tcp')
+  if (navisService.success && navisService.found) {
+    console.log('✅ mDNS service: _navisai._tcp advertised')
+  } else if (navisService.success) {
+    console.log('⚠️  mDNS service: _navisai._tcp not observed')
+  } else {
+    console.log(`⚠️  mDNS service browse failed: ${navisService.error}`)
+  }
+
   // Test direct daemon connectivity
   try {
-    const daemonResponse = await fetch('https://127.0.0.1:47621/api/status', {
+    const daemonResponse = await fetch('https://127.0.0.1:47621/status', {
       headers: { 'Host': 'navis.local' }
     })
     if (daemonResponse.ok) {
