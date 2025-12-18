@@ -182,7 +182,17 @@ For repeatable onboarding tests, Navis supports a **confirm-gated** cleanup comm
   - **Leaves user's applications running on port 443 untouched**
   - After cleanup, `https://navis.local` is expected to be unreachable until `navisai setup` is run again.
 
-### 7.2 Safety requirements
+### 7.2 Emergency stop (bridge crash recovery)
+
+If the bridge crashes and pf/iptables rules remain active, run:
+
+```bash
+pnpm bridge:emergency-stop
+```
+
+This command is manual, privileged, and intended only for recovery (Refs: navisai-735).
+
+### 7.3 Safety requirements
 
 - Must confirm the bridge can be removed without disrupting user services
 - Must verify port 443 remains accessible after bridge removal
