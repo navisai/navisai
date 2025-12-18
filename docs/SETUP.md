@@ -82,6 +82,9 @@ Packet forwarding by platform:
 2. **Linux**: iptables with string matching on Host header
 3. **Windows**: netsh portproxy (forwards all 443 traffic)
 
+macOS note (encapsulation):
+- On macOS, Navis may reserve a **dedicated IP alias** on the active LAN interface and advertise `navis.local` to that alias via mDNS so `:443` interception never touches other dev tools (ServBay/nginx, etc.). This alias is chosen from the current LAN subnet and can change when switching networks (Refs: navisai-i3s, navisai-2bn).
+
 ### 3.2 mDNS/Bonjour for `navis.local`
 
 Requirements:

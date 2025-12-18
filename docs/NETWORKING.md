@@ -132,6 +132,7 @@ If a non‑Navis local HTTPS service starts showing “Not secure” after setup
 - Navis must be “invisible” to those tools: no TLS MITM, no certificate generation for non‑Navis domains, and no breaking existing nginx routing (Refs: navisai-288, navisai-ms0).
 - macOS pf has a known limitation: traffic originating on the same machine can bypass `rdr` (localhost-origin) rules, so on-host requests to `https://navis.local` may land in the existing `:443` listener (e.g., ServBay’s default vhost) instead of Navis (Refs: navisai-5zu).
 - The long-term fix for true encapsulation is to give `navis.local` a dedicated IP (IP alias) and redirect only that IP, so other `:443` services are never intercepted at all (Refs: navisai-i3s).
+  - This dedicated IP is auto-chosen from the current LAN subnet and is **per-network** (it can change when you switch networks/SSIDs) (Refs: navisai-2bn).
 
 ### 5.2 Implementation by Platform
 
