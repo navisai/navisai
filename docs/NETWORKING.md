@@ -96,6 +96,7 @@ Implementation note:
 - Generates/refreshes the `navis.local` certificate.
 - Detects existing port 443 usage but proceeds regardless (no conflicts).
 - Installs OS service for managing packet forwarding rules.
+- On macOS, installs `pf` anchor points into `/etc/pf.conf` (high-risk) so the `navisai/*` anchors are reachable by `pfctl` (Refs: navisai-7yr).
 
 This step may require admin privileges once. It's explicit, reversible, and never silent.
 
@@ -148,6 +149,8 @@ echo "rdr pass inet proto tcp from any to ${LAN_IP} port 443 -> 127.0.0.1 port 8
 # The transparent proxy inspects TLS SNI and routes:
 # - navis.local → 127.0.0.1:47621 (NavisAI daemon)
 # - other domains → original destinations (passthrough, no MITM)
+# If SNI is missing (common when accessing by raw IP), the proxy must not drop;
+# it should route to the daemon as a debug fallback (expect a cert warning on IP access).
 ```
 
 **Linux**:

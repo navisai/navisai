@@ -20,7 +20,7 @@ To make this work without requiring users to run `sudo` for daily usage, Navis r
 
 1. **Installs intelligent packet forwarding** with transparent HTTPS proxy that selectively routes navis.local traffic to the daemon.
 2. Enables **mDNS/Bonjour** so `navis.local` resolves on the LAN to the host machine's LAN IP.
-3. Generates/refreshes local TLS material for `navis.local` and auto-detected development servers.
+3. Generates/refreshes local TLS material for `navis.local` only.
 4. **Zero conflicts with existing services** - other development tools and HTTPS services continue working normally.
 5. **Auto-detects local development servers** and creates convenient domain mappings (e.g., app.localhost, api.localhost).
 6. Guides device trust for mobile clients (iOS requires explicit trust for local certificates).
@@ -69,7 +69,7 @@ Requirements:
 - **Installs transparent HTTPS proxy** with intelligent domain-based routing
 - **Routes `navis.local` traffic** to Navis daemon on `127.0.0.1:47621`
 - **Routes all other domains** through unchanged (no interference)
-- **Selective TLS termination** with end-to-end encryption preservation
+- **No TLS MITM for non‑Navis domains** (do not generate certs for other dev tools/domains)
 - **Works alongside existing services** without conflicts
 - **Auto-detects local dev servers** and creates domain mappings
 - Managed by the OS service manager for persistence
@@ -95,11 +95,12 @@ Requirements:
 
 Requirements:
 
-- The bridge serves HTTPS with a certificate valid for `navis.local`.
+- The daemon serves HTTPS with a certificate valid for `navis.local`.
+- The bridge must not mint/serve certificates for non‑Navis domains.
 - Setup generates and stores cert material under `~/.navis/certs/`:
   - `~/.navis/certs/navis.local.crt`
   - `~/.navis/certs/navis.local.key`
-- For forwarding to user's app: either pass through original TLS or re-encrypt
+- For forwarding to user's app: pass through original TLS unchanged
 - iOS trust guidance provided in onboarding
 
 ---
@@ -155,6 +156,7 @@ The bridge uninstall must:
 1. Stop the bridge process
 2. **Ensure the original port 443 service continues uninterrupted**
 3. Remove LaunchDaemon/service files
+4. Restore `/etc/pf.conf` only if Navis previously installed it (do not overwrite custom PF configs) (Refs: navisai-7yr)
 
 ---
 
@@ -169,11 +171,13 @@ For repeatable onboarding tests, Navis supports a **confirm-gated** cleanup comm
   - Does NOT affect the user's port 443 applications
   - Optionally removes TLS certs
   - Preserves all Navis data
+  - After cleanup, `https://navis.local` is expected to be unreachable until `navisai setup` is run again.
 
 - `navisai cleanup --all` (destructive):
   - Removes bridge service
   - Removes all Navis local state
   - **Leaves user's applications running on port 443 untouched**
+  - After cleanup, `https://navis.local` is expected to be unreachable until `navisai setup` is run again.
 
 ### 7.2 Safety requirements
 
