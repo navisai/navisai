@@ -26,6 +26,8 @@ const listenPort = 443
 const targetHost = '127.0.0.1'
 const targetPort = 47621
 const targetDomain = 'navis.local'
+const mdnsServiceType = '_navisai._tcp.local'
+const mdnsServiceInstance = 'NavisAI._navisai._tcp.local'
 
 class PacketForwardingBridge {
   constructor() {
@@ -37,6 +39,7 @@ class PacketForwardingBridge {
     this.lanIp = null
     this.lanNetmask = null
     this.navisAliasIp = null
+    this.navisAliasInterface = null
     this.ipMonitorInterval = null
     this.transparentProxy = new TransparentHTTPSProxy({
       proxyPort: 8443,
@@ -64,27 +67,73 @@ class PacketForwardingBridge {
     return [24, 16, 8, 0].map((shift) => (int >>> shift) & 255).join('.')
   }
 
-  async ensureNavisAliasIp() {
+  getSubnetInfo(ip, netmask) {
+    const base = this.ipToInt(ip)
+    const mask = this.ipToInt(netmask)
+    const network = base & mask
+    const broadcast = network | (~mask >>> 0)
+    const hostMin = network + 1
+    const hostMax = broadcast - 1
+    if (hostMax <= hostMin) return null
+    return {
+      network,
+      broadcast,
+      hostMin,
+      hostMax,
+      hostCount: hostMax - hostMin + 1,
+    }
+  }
+
+  getAliasCandidates(lan) {
+    const subnet = this.getSubnetInfo(lan.ip, lan.netmask)
+    if (!subnet) return []
+
+    const base = this.ipToInt(lan.ip)
+    const seed = (base ^ this.ipToInt(lan.netmask)) >>> 0
+    const startIndex = seed % subnet.hostCount
+    const step = 17
+    const attempts = Math.min(subnet.hostCount, 48)
+    const candidates = []
+
+    for (let i = 0; i < attempts; i++) {
+      const index = (startIndex + i * step) % subnet.hostCount
+      const candidate = subnet.hostMin + index
+      if (candidate === base) continue
+      candidates.push(this.intToIp(candidate))
+    }
+
+    return candidates
+  }
+
+  async releaseNavisAliasIp() {
+    if (!this.navisAliasIp || !this.navisAliasInterface) return
+    try {
+      execSync(`sudo ifconfig ${this.navisAliasInterface} -alias ${this.navisAliasIp} || true`, { stdio: 'pipe' })
+      console.log(`🧹 Released navis.local alias: ${this.navisAliasIp} (${this.navisAliasInterface})`)
+    } catch {
+      // Ignore cleanup errors.
+    } finally {
+      this.navisAliasIp = null
+      this.navisAliasInterface = null
+    }
+  }
+
+  async ensureNavisAliasIp(lanOverride = null) {
     if (this.platform !== 'darwin') return null
 
-    const lan = this.getLanInterfaceIPv4()
+    const lan = lanOverride || this.getLanInterfaceIPv4()
     if (!lan) return null
 
     this.lanInterface = lan.name
     this.lanIp = lan.ip
     this.lanNetmask = lan.netmask
 
-    const base = this.ipToInt(lan.ip)
-    const mask = this.ipToInt(lan.netmask)
-    const network = base & mask
-
-    for (let offset = 1; offset <= 10; offset++) {
-      const candidate = this.intToIp(network | ((base + offset) & ~mask))
-      if (candidate === lan.ip) continue
-
+    const candidates = this.getAliasCandidates(lan)
+    for (const candidate of candidates) {
       try {
         execSync(`sudo ifconfig ${lan.name} alias ${candidate} ${lan.netmask}`, { stdio: 'pipe' })
         this.navisAliasIp = candidate
+        this.navisAliasInterface = lan.name
         this.cleanupCommands.push(`sudo ifconfig ${lan.name} -alias ${candidate} || true`)
         console.log(`✅ Reserved dedicated IP for navis.local: ${candidate} (${lan.name})`)
         return candidate
@@ -111,6 +160,10 @@ class PacketForwardingBridge {
       const aliasIp = await this.ensureNavisAliasIp()
       if (aliasIp) {
         this.transparentProxy.setRedirectIps([aliasIp])
+        if (this.lanIp) {
+          this.transparentProxy.setPassthroughHost(this.lanIp)
+        }
+        this.transparentProxy.setEnableLoopbackRdr(true)
       }
 
       // Start transparent HTTPS proxy for domain-based routing
@@ -187,63 +240,84 @@ class PacketForwardingBridge {
 
       this.mdns = multicastDns()
 
+      const buildMdnsRecords = (address) => ([
+        {
+          name: mdnsServiceType,
+          type: 'PTR',
+          data: mdnsServiceInstance,
+          ttl: 120,
+        },
+        {
+          name: mdnsServiceInstance,
+          type: 'SRV',
+          data: { port: 443, weight: 0, priority: 10, target: targetDomain },
+          ttl: 120,
+        },
+        {
+          name: mdnsServiceInstance,
+          type: 'TXT',
+          data: ['version=1', 'tls=1', 'origin=https://navis.local'],
+          ttl: 120,
+        },
+        { name: targetDomain, type: 'A', ttl: 120, data: address },
+      ])
+
       // Respond to queries for navis.local
       this.mdns.on('query', (query) => {
         const questions = query.questions || []
-        for (const q of questions) {
-          if (q.name === 'navis.local' && q.type === 'A') {
-            this.mdns.respond({
-              answers: [{ name: 'navis.local', type: 'A', ttl: 120, data: ip }],
-            })
-          }
+        const advertised = this.navisAliasIp || this.lanIp || ip
+        if (!advertised) return
+
+        const wantsNavis =
+          questions.some((q) => q.name === targetDomain && (q.type === 'A' || q.type === 'ANY')) ||
+          questions.some((q) => q.name === mdnsServiceType && (q.type === 'PTR' || q.type === 'ANY')) ||
+          questions.some((q) => q.name === mdnsServiceInstance && (q.type === 'SRV' || q.type === 'TXT' || q.type === 'ANY'))
+
+        if (wantsNavis) {
+          this.mdns.respond({ answers: buildMdnsRecords(advertised) })
         }
       })
 
       // Initial advertisement
-      this.mdns.respond({
-        answers: [
-          {
-            name: '_navisai._tcp.local',
-            type: 'PTR',
-            data: 'NavisAI._navisai._tcp.local',
-            ttl: 120,
-          },
-          {
-            name: 'NavisAI._navisai._tcp.local',
-            type: 'SRV',
-            data: { port: 443, weight: 0, priority: 10, target: 'navis.local' },
-            ttl: 120,
-          },
-          {
-            name: 'NavisAI._navisai._tcp.local',
-            type: 'TXT',
-            data: ['version=1', 'tls=1', 'origin=https://navis.local'],
-            ttl: 120,
-          },
-          { name: 'navis.local', type: 'A', ttl: 120, data: ip },
-        ],
-      })
+      this.mdns.respond({ answers: buildMdnsRecords(ip) })
 
       console.log('✅ mDNS service active for navis.local')
 
       // Monitor IP changes and update mDNS
-      this.ipMonitorInterval = setInterval(() => {
+      this.ipMonitorInterval = setInterval(async () => {
         const newLan = this.getLanInterfaceIPv4()
         if (!newLan || !newLan.ip) return
 
-        if (newLan.ip !== this.lanIp) {
+        const lanChanged = newLan.ip !== this.lanIp || newLan.netmask !== this.lanNetmask || newLan.name !== this.lanInterface
+        if (lanChanged) {
           console.log(`🔄 LAN IP changed: ${this.lanIp} → ${newLan.ip}`)
           this.lanInterface = newLan.name
           this.lanIp = newLan.ip
           this.lanNetmask = newLan.netmask
+
+          if (this.platform === 'darwin') {
+            await this.releaseNavisAliasIp()
+            const aliasIp = await this.ensureNavisAliasIp(newLan)
+            if (aliasIp) {
+              this.transparentProxy.setRedirectIps([aliasIp])
+              this.transparentProxy.setEnableLoopbackRdr(true)
+            } else {
+              this.transparentProxy.setRedirectIps(null)
+              this.transparentProxy.setEnableLoopbackRdr(false)
+            }
+
+            if (this.lanIp) {
+              this.transparentProxy.setPassthroughHost(this.lanIp)
+            }
+
+            await this.transparentProxy.reloadPfRules()
+          }
         }
 
         // Re-advertise current target (alias if present, else LAN IP).
         const advertised = this.navisAliasIp || this.lanIp
         if (advertised) {
-          this.mdns.respond({
-            answers: [{ name: 'navis.local', type: 'A', ttl: 120, data: advertised }],
-          })
+          this.mdns.respond({ answers: buildMdnsRecords(advertised) })
         }
       }, 30000) // Check every 30 seconds
 
@@ -397,8 +471,11 @@ class PacketForwardingBridge {
 
       // Check packet forwarding status
       if (this.platform === 'darwin') {
-        const output = execSync('sudo pfctl -s rules -a navis', { encoding: 'utf8' })
-        packetForwardingActive = output.includes(targetDomain) || output.includes(`${targetPort}`)
+        const proxyNat = execSync('sudo pfctl -a navisai/proxy -s nat 2>/dev/null || true', { encoding: 'utf8' })
+        const filterRules = execSync('sudo pfctl -a navisai/filter -s rules 2>/dev/null || true', { encoding: 'utf8' })
+        packetForwardingActive =
+          (proxyNat.includes('rdr') && proxyNat.includes('8443')) ||
+          filterRules.includes('keep state')
       } else if (this.platform === 'linux') {
         const output = execSync('sudo iptables -t nat -L PREROUTING -n -v', { encoding: 'utf8' })
         packetForwardingActive = output.includes(targetDomain) || output.includes(`${targetPort}`)

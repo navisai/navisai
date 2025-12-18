@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { exec as execCb, execFile as execFileCb } from 'node:child_process'
+import fs from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { installBridge, uninstallBridge } from './bridge.js'
 
@@ -48,6 +49,20 @@ async function isBridgeInstalled() {
   }
 }
 
+async function checkLaunchdService(label) {
+  try {
+    const { stdout } = await execAsync(`launchctl print system/${label} 2>/dev/null || true`, { encoding: 'utf8' })
+    if (!stdout.trim()) return { loaded: false }
+    const state = stdout.match(/\\bstate = (\\w+)/)?.[1] ?? null
+    const pid = stdout.match(/\\bpid = (\\d+)/)?.[1] ?? null
+    const lastExitCode = stdout.match(/\\blast exit code = (\\d+)/)?.[1] ?? null
+    const mayBePermissionLimited = !stdout.includes('state =') && !stdout.includes('pid =')
+    return { loaded: true, state, pid, lastExitCode, mayBePermissionLimited }
+  } catch (error) {
+    return { loaded: null, error: error.message }
+  }
+}
+
 async function isNavisReachable() {
   try {
     const response = await fetch('https://navis.local/status')
@@ -84,9 +99,26 @@ async function main() {
   try {
     if (choice === 'Enable') {
       await installBridge('darwin')
+      const bridgePlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
+      const bridgeExists = await fs.access(bridgePlist).then(() => true).catch(() => false)
+      const launchd = await checkLaunchdService('com.navisai.bridge')
+
+      if (bridgeExists && launchd.loaded && launchd.state === 'running') {
+        await showAlert(
+          'Enabled',
+          'Navis Bridge is enabled. Start Navis with `navisai up` to begin onboarding at https://navis.local/welcome.'
+        )
+        return
+      }
+
+      const statusLines = [
+        `Plist installed: ${bridgeExists ? 'yes' : 'no'} (${bridgePlist})`,
+        launchd.loaded ? `launchd state: ${launchd.state ?? 'unknown'}` : 'launchd: not loaded',
+      ]
+
       await showAlert(
-        'Enabled',
-        'Navis Bridge is enabled. Start Navis with `navisai up` to begin onboarding at https://navis.local/welcome.'
+        'Setup incomplete',
+        `Navis Bridge install finished but the service is not running.\n\n${statusLines.join('\n')}\n\nTry:\n- navisai setup --skip-ui\n- sudo launchctl kickstart -k system/com.navisai.bridge\n- navisai doctor\n\nRefs: navisai-45k`
       )
       return
     }

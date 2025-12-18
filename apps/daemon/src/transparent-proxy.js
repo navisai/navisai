@@ -21,6 +21,9 @@ export class TransparentHTTPSProxy {
       proxyPort: options.proxyPort || 8443,
       daemonHost: options.daemonHost || '127.0.0.1',
       daemonPort: options.daemonPort || 47621,
+      passthroughHost: options.passthroughHost || '127.0.0.1',
+      passthroughPort: options.passthroughPort || 443,
+      enableLoopbackRdr: options.enableLoopbackRdr === true,
       enableDevServerDetection: options.enableDevServerDetection !== false,
       redirectIps: options.redirectIps || null,
       ...options
@@ -55,37 +58,60 @@ export class TransparentHTTPSProxy {
     this.options.redirectIps = redirectIps
   }
 
+  setPassthroughHost(host) {
+    if (host) {
+      this.options.passthroughHost = host
+    }
+  }
+
+  setEnableLoopbackRdr(enabled) {
+    this.options.enableLoopbackRdr = Boolean(enabled)
+  }
+
+  async reloadPfRules() {
+    if (!this.isRunning) return
+    await this.removePfRules()
+    await this.createPfRules()
+  }
+
+  getPassthroughTarget() {
+    return {
+      host: this.options.passthroughHost,
+      port: this.options.passthroughPort
+    }
+  }
+
   /**
    * Extract SNI from TLS Client Hello message
-   * @param {Buffer} data - First packet of TLS handshake
-   * @returns {string|null} - SNI hostname or null if not found
+   * @param {Buffer} data - TLS handshake bytes
+   * @returns {{sni: string|null, needsMore: boolean}}
    */
   extractSNI(data) {
     try {
       // TLS record header: type(1) + version(2) + length(2)
       if (data.length < 5) {
-        return null
+        return { sni: null, needsMore: true }
       }
 
       // Verify this is a TLS handshake record (0x16) and a TLSv1.x record (0x03xx)
       if (data[0] !== 0x16 || data[1] !== 0x03) {
-        return null
+        return { sni: null, needsMore: false }
       }
 
       const recordLength = data.readUInt16BE(3)
       if (recordLength <= 0 || 5 + recordLength > data.length) {
-        return null
+        return { sni: null, needsMore: true }
       }
 
       // Handshake header: msg_type(1) + length(3)
       const handshakeOffset = 5
       if (handshakeOffset + 4 > data.length) {
-        return null
+        return { sni: null, needsMore: true }
       }
 
       const handshakeType = data[handshakeOffset]
       if (handshakeType !== 0x01) {
-        return null
+        return { sni: null, needsMore: false }
       }
 
       const clientHelloOffset = handshakeOffset + 4
@@ -93,51 +119,51 @@ export class TransparentHTTPSProxy {
 
       // client_version(2) + random(32)
       if (offset + 2 + 32 > data.length) {
-        return null
+        return { sni: null, needsMore: true }
       }
       offset += 2 + 32
 
       // session_id
-      if (offset + 1 > data.length) return null
+      if (offset + 1 > data.length) return { sni: null, needsMore: true }
       const sessionIdLen = data.readUInt8(offset)
       offset += 1
-      if (offset + sessionIdLen > data.length) return null
+      if (offset + sessionIdLen > data.length) return { sni: null, needsMore: true }
       offset += sessionIdLen
 
       // cipher_suites
-      if (offset + 2 > data.length) return null
+      if (offset + 2 > data.length) return { sni: null, needsMore: true }
       const cipherSuitesLen = data.readUInt16BE(offset)
       offset += 2
-      if (offset + cipherSuitesLen > data.length) return null
+      if (offset + cipherSuitesLen > data.length) return { sni: null, needsMore: true }
       offset += cipherSuitesLen
 
       // compression_methods
-      if (offset + 1 > data.length) return null
+      if (offset + 1 > data.length) return { sni: null, needsMore: true }
       const compressionMethodsLen = data.readUInt8(offset)
       offset += 1
-      if (offset + compressionMethodsLen > data.length) return null
+      if (offset + compressionMethodsLen > data.length) return { sni: null, needsMore: true }
       offset += compressionMethodsLen
 
       // extensions
       if (offset === data.length) {
-        return null
+        return { sni: null, needsMore: false }
       }
 
-      if (offset + 2 > data.length) return null
+      if (offset + 2 > data.length) return { sni: null, needsMore: true }
       const extensionsLen = data.readUInt16BE(offset)
       offset += 2
       const extensionsEnd = offset + extensionsLen
-      if (extensionsEnd > data.length) return null
+      if (extensionsEnd > data.length) return { sni: null, needsMore: true }
 
       // Parse extensions
       while (offset + 4 <= extensionsEnd) {
         const extType = data.readUInt16BE(offset)
         const extLen = data.readUInt16BE(offset + 2)
         offset += 4
-        if (offset + extLen > extensionsEnd) break
+        if (offset + extLen > extensionsEnd) return { sni: null, needsMore: true }
 
         if (extType === 0x0000) { // SNI extension
-          if (extLen < 2 || offset + 2 > extensionsEnd) break
+          if (extLen < 2 || offset + 2 > extensionsEnd) return { sni: null, needsMore: true }
           const listLen = data.readUInt16BE(offset)
           let listOffset = offset + 2
           const listEnd = Math.min(listOffset + listLen, offset + extLen, extensionsEnd)
@@ -146,14 +172,14 @@ export class TransparentHTTPSProxy {
             const nameType = data.readUInt8(listOffset)
             const nameLen = data.readUInt16BE(listOffset + 1)
             listOffset += 3
-            if (listOffset + nameLen > listEnd) break
+            if (listOffset + nameLen > listEnd) return { sni: null, needsMore: true }
 
             if (nameType === 0x00) {
-              return data.toString('utf8', listOffset, listOffset + nameLen)
+              return { sni: data.toString('utf8', listOffset, listOffset + nameLen), needsMore: false }
             }
             listOffset += nameLen
           }
-          break
+          return { sni: null, needsMore: false }
         }
 
         offset += extLen
@@ -162,7 +188,7 @@ export class TransparentHTTPSProxy {
       logger.debug('SNI extraction error:', error.message)
     }
 
-    return null
+    return { sni: null, needsMore: false }
   }
 
   /**
@@ -183,6 +209,17 @@ export class TransparentHTTPSProxy {
     const filterRules = localIps.map(
       (ip) => `pass in quick inet proto tcp from any to ${ip} port 443 keep state`
     )
+
+    if (this.options.enableLoopbackRdr) {
+      for (const ip of localIps) {
+        natRules.push(
+          `rdr pass on lo0 inet proto tcp from any to ${ip} port 443 -> 127.0.0.1 port ${this.options.proxyPort}`
+        )
+        filterRules.push(
+          `pass in quick on lo0 inet proto tcp from any to ${ip} port 443 keep state`
+        )
+      }
+    }
 
     const natConfig = natRules.join('\n')
     const filterConfig = filterRules.join('\n')
@@ -291,11 +328,18 @@ export class TransparentHTTPSProxy {
   handleConnection(clientSocket) {
     this.connections.add(clientSocket)
 
-    // Buffer to capture first packet for SNI extraction
+    // Buffer to capture TLS handshake for SNI extraction
     let targetSocket = null
 
-    clientSocket.once('data', async (firstPacket) => {
-      const sni = this.extractSNI(firstPacket)
+    const buffered = []
+    let bufferedBytes = 0
+    let decided = false
+    const maxBufferedBytes = 8192
+
+    const decideRouting = async (sni, firstPacket) => {
+      if (decided) return
+      decided = true
+      clientSocket.removeListener('data', onData)
 
       if (!sni) {
         // Clients connecting by raw IP often omit SNI. For safety, do not MITM.
@@ -339,29 +383,12 @@ export class TransparentHTTPSProxy {
         )
         logger.debug(`Routing navis.local to daemon at ${this.options.daemonHost}:${this.options.daemonPort}`)
         targetSocket = createConnection({ host: this.options.daemonHost, port: this.options.daemonPort })
-      } else if (this.devServerDetector) {
-        const domainMappings = this.devServerDetector.getDomainMappings()
-        const mappedPort = domainMappings.get(sni)
-
-        if (mappedPort) {
-          logger.debug(`Routing ${sni} to localhost:${mappedPort}`)
-          targetSocket = createConnection({ host: '127.0.0.1', port: mappedPort })
-        } else if (sni.endsWith('.localhost') || sni.endsWith('.local')) {
-          const port = await this.tryDetectServerForDomain(sni)
-          if (!port) {
-            logger.warn(`Unknown local domain: ${sni}`)
-            clientSocket.destroy()
-            return
-          }
-          logger.debug(`Routing ${sni} to detected localhost:${port}`)
-          targetSocket = createConnection({ host: '127.0.0.1', port })
-        } else {
-          logger.debug(`Routing ${sni} to external destination`)
-          targetSocket = createConnection({ host: sni, port: 443 })
-        }
       } else {
-        logger.debug(`Routing ${sni} to original destination`)
-        targetSocket = createConnection({ host: sni, port: 443 })
+        const passthroughTarget = this.getPassthroughTarget()
+        logger.debug(
+          `Passthrough TLS for ${sni} to ${passthroughTarget.host}:${passthroughTarget.port}`
+        )
+        targetSocket = createConnection(passthroughTarget)
       }
 
       targetSocket.on('error', (error) => {
@@ -377,7 +404,23 @@ export class TransparentHTTPSProxy {
       targetSocket.on('close', () => {
         if (!clientSocket.destroyed) clientSocket.destroy()
       })
-    })
+    }
+
+    const onData = (chunk) => {
+      if (decided) return
+      buffered.push(chunk)
+      bufferedBytes += chunk.length
+
+      const data = buffered.length === 1 ? buffered[0] : Buffer.concat(buffered, bufferedBytes)
+      const { sni, needsMore } = this.extractSNI(data)
+      if (needsMore && bufferedBytes < maxBufferedBytes) {
+        return
+      }
+
+      decideRouting(sni, data)
+    }
+
+    clientSocket.on('data', onData)
 
     // Handle connection close
     clientSocket.on('close', () => {

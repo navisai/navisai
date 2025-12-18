@@ -771,7 +771,36 @@ find . -name "coverage" -type d -mtime +7 -exec rm -rf {} +
 
 ## 14. Continuous Verification Workflow
 
-### 14.1 Automated Verification Cadence
+### 14.0 Continuous Progress Rule
+Agents must always work continuously: pick the highest-priority unblocked Beads issue and proceed until completion. Do not pause between issues unless a Stop Condition applies.
+
+### 14.1 Default Next Step
+After closing an issue, immediately run `bd ready`, select the highest-priority item, set it to `in_progress`, and continue without waiting for human input.
+
+### 14.2 Stop Conditions
+Only pause for:
+1. Required human approval (high-risk ops, doc sweeps, sandbox escalation).
+2. Missing/conflicting canonical docs (write a feasibility note and wait).
+3. Hard test failures requiring product decisions.
+4. Commands blocked by sandbox/network restrictions with no safe workaround.
+5. Unexpected changes you didn’t make (stop and ask).
+
+### 14.3 Blocking & Detours
+If blocked, create a Beads issue describing the blocker with doc refs, add dependencies via `bd dep add`, label it `blocked`, then immediately move to the next highest-priority unblocked issue.
+
+### 14.4 Verification Failure Handling
+If `pnpm verify` fails, attempt a fix in-scope. If not quickly fixable, create a Beads issue with logs + suspected cause, mark current issue `blocked`, and continue to the next unblocked item.
+
+### 14.5 Approval Escalation Protocol
+If a needed command requires approval or escalation, request approval immediately (no extra prompt), then continue other unblocked work while waiting.
+
+### 14.6 Interactive Testing
+Prefer non-interactive test modes. If a command prompts, rerun with non-interactive flags or document the exact prompt/response needed. If testing is inherently interactive (UI/OS dialogs), create a Beads issue describing the required steps and proceed to the next unblocked task.
+
+### 14.7 Status Cadence
+Always update Beads status at start/finish; note governing doc refs and tests in the issue comment. Do not create TODO/FIXME without a Beads reference.
+
+### 14.8 Automated Verification Cadence
 **Daily Checks**:
 - Run `pnpm verify` to ensure all builds pass
 - **Check for ANY TODO/FIXME comments without Beads links** - ALL must reference a Beads issue ID
@@ -792,7 +821,7 @@ find . -name "coverage" -type d -mtime +7 -exec rm -rf {} +
 - Verify test coverage remains above 80%
 - Audit package.json for unused dependencies
 
-### 14.2 Gap Detection Protocol
+### 14.9 Gap Detection Protocol
 When gaps are detected:
 1. **Document immediately**: Create Bead with descriptive title
 2. **Assess impact**: Label P0 (critical), P1 (high), P2 (medium), P3 (low)
@@ -800,7 +829,7 @@ When gaps are detected:
 4. **Create test**: Write failing test that documents expected behavior
 5. **Assign owner**: Tag appropriate agent or team
 
-### 14.3 Auto-Test Generation (For Gaps)
+### 14.10 Auto-Test Generation (For Gaps)
 For critical gaps (P0/P1):
 ```javascript
 // Example: Auto-generate test for missing endpoint
@@ -816,7 +845,7 @@ const generateEndpointTest = (method, path, expectedStatus) => ({
 })
 ```
 
-### 14.4 Verification Scripts
+### 14.11 Verification Scripts
 Add to `package.json`:
 ```json
 {
@@ -829,12 +858,19 @@ Add to `package.json`:
 }
 ```
 
-### 14.5 Monthly Architecture Review
+### 14.12 Monthly Architecture Review
 - Verify all components in `docs/ARCHITECTURE.md` have current implementations
 - Check performance benchmarks match documented targets
 - Review security audit logs against SECURITY.md requirements
 - Validate onboarding flow against ONBOARDING_FLOW.md
 - Ensure all premium hooks are properly stubbed in OSS version
+
+### 14.13 Git Hygiene & Cadence
+- Use `git status --porcelain` before and after work; avoid touching unrelated files.
+- Do not revert or modify changes you didn’t make unless explicitly asked.
+- Commit early and often. Make small, focused commits as logical checkpoints.
+- Do not amend unless explicitly requested.
+- Clean temporary/test artifacts before finishing; follow Section 13 hygiene rules.
 
 ---
 

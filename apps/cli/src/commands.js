@@ -75,6 +75,36 @@ async function queryMdnsARecord(hostname) {
   }
 }
 
+async function queryMdnsRecord(name, recordType) {
+  if (!(await hasCommand('dns-sd'))) {
+    return { success: false, error: 'dns-sd not available' }
+  }
+
+  try {
+    const { stdout } = await execAsync(
+      `perl -e 'alarm 3; exec "dns-sd", "-Q", "${name}", "${recordType}"' 2>/dev/null || true`,
+      { encoding: 'utf8' }
+    )
+    const line = stdout
+      .split('\n')
+      .map((row) => row.trim())
+      .find((row) => row.includes(`${name}.`) && row.includes(` ${recordType} `))
+    if (!line) return { success: false, error: `No mDNS ${recordType} answer observed for ${name}` }
+    return { success: true, line }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
+function extractMdnsToken(line, marker) {
+  if (!line) return null
+  const normalized = line.replace(/\s+/g, ' ').trim()
+  const index = normalized.indexOf(marker)
+  if (index === -1) return null
+  const slice = normalized.slice(index + marker.length).trim()
+  return slice.split(' ')[0]?.replace(/\.$/, '') || null
+}
+
 async function browseMdnsService(serviceType, domain = 'local') {
   if (!(await hasCommand('dns-sd'))) {
     return { success: false, error: 'dns-sd not available' }
@@ -213,6 +243,24 @@ async function hasCommand(cmd) {
 async function execWithTimeout(command, options = {}) {
   const { timeoutMs = 15000, ...rest } = options
   return execAsync(command, { ...rest, timeout: timeoutMs })
+}
+
+async function findRepoRoot(startDir) {
+  let current = startDir
+  for (let i = 0; i < 8; i++) {
+    const pkgPath = path.join(current, 'package.json')
+    try {
+      const content = await fs.readFile(pkgPath, 'utf8')
+      const pkg = JSON.parse(content)
+      if (pkg?.name === 'navisai') return current
+    } catch {
+      // Not a repo root.
+    }
+    const parent = path.dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return null
 }
 
 async function runLinuxAdminShell(shellCommand) {
@@ -668,6 +716,38 @@ async function checkLaunchdService(label) {
   }
 }
 
+async function readPfProxyTargets() {
+  if (platform() !== 'darwin') return { success: false, error: 'pfctl not supported' }
+  try {
+    const { stdout } = await execWithTimeout('sudo -n pfctl -a navisai/proxy -s nat 2>/dev/null || true')
+    const targets = stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('rdr'))
+      .map((line) => line.match(/\bto\s+(\d+\.\d+\.\d+\.\d+)/)?.[1])
+      .filter(Boolean)
+    return { success: true, targets: [...new Set(targets)] }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
+async function readAliasIps() {
+  if (platform() !== 'darwin') return { success: false, error: 'ifconfig not supported' }
+  try {
+    const { stdout } = await execWithTimeout('ifconfig -a 2>/dev/null || true')
+    const aliases = stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('inet ') && line.includes(' netmask '))
+      .map((line) => line.split(/\s+/)[1])
+      .filter((ip) => ip && ip !== '127.0.0.1')
+    return { success: true, aliases: [...new Set(aliases)] }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
 export async function doctorCommand() {
   console.log('Running Navis diagnostics...\n')
 
@@ -857,6 +937,90 @@ export async function doctorCommand() {
     console.log(`⚠️  mDNS service browse failed: ${navisService.error}`)
   }
 
+  const mdnsServiceType = '_navisai._tcp.local'
+  const mdnsInstance = 'NavisAI._navisai._tcp.local'
+  const ptrResult = await queryMdnsRecord(mdnsServiceType, 'PTR')
+  if (ptrResult.success) {
+    const target = ptrResult.line.match(/\bPTR\s+(\S+)/)?.[1]?.replace(/\.$/, '')
+    console.log(`✅ mDNS PTR: ${mdnsServiceType} -> ${target || 'unknown'}`)
+    const instanceName = target || mdnsInstance
+
+    const srvResult = await queryMdnsRecord(instanceName, 'SRV')
+    if (srvResult.success) {
+      const srvTarget = extractMdnsToken(srvResult.line, ' SRV ')
+      const hasPort = srvResult.line.match(/\b443\b/)
+      if (srvTarget && hasPort) {
+        console.log(`✅ mDNS SRV: ${instanceName} -> ${srvTarget}:443`)
+      } else {
+        console.log(`⚠️  mDNS SRV: unexpected data (${srvResult.line})`)
+      }
+      if (srvTarget && mdnsIp && srvTarget !== 'navis.local') {
+        console.log(`⚠️  mDNS SRV target mismatch: expected navis.local, got ${srvTarget}`)
+        allGood = false
+      }
+    } else {
+      console.log(`⚠️  mDNS SRV: ${srvResult.error}`)
+    }
+
+    const txtResult = await queryMdnsRecord(instanceName, 'TXT')
+    if (txtResult.success) {
+      const txtLine = txtResult.line
+      const hasTls = txtLine.includes('tls=1')
+      const hasOrigin = txtLine.includes('origin=https://navis.local')
+      const hasVersion = txtLine.includes('version=1')
+      if (hasTls && hasOrigin && hasVersion) {
+        console.log(`✅ mDNS TXT: ${instanceName} (tls=1, origin=https://navis.local)`)
+      } else {
+        console.log(`⚠️  mDNS TXT: unexpected data (${txtLine})`)
+      }
+    } else {
+      console.log(`⚠️  mDNS TXT: ${txtResult.error}`)
+    }
+
+    if (mdnsIp && instanceName) {
+      const srvTarget = extractMdnsToken(srvResult.line, ' SRV ')
+      if (srvTarget && srvTarget === 'navis.local') {
+        const srvA = await queryMdnsARecord(srvTarget)
+        if (srvA.success && srvA.address !== mdnsIp) {
+          console.log(`⚠️  mDNS mismatch: SRV target A ${srvA.address} != navis.local A ${mdnsIp}`)
+          allGood = false
+        } else if (srvA.success) {
+          console.log(`✅ mDNS SRV target A matches navis.local A (${srvA.address})`)
+        }
+      }
+    }
+  } else {
+    console.log(`⚠️  mDNS PTR: ${ptrResult.error}`)
+  }
+
+  if (os === 'darwin') {
+    const mdnsIp = mdnsResult.success ? mdnsResult.address : null
+    const pfTargets = await readPfProxyTargets()
+    const aliasIps = await readAliasIps()
+
+    if (pfTargets.success) {
+      console.log(`✅ pf rdr targets: ${pfTargets.targets.length > 0 ? pfTargets.targets.join(', ') : 'none'}`)
+    } else {
+      console.log(`⚠️  pf rdr targets unavailable: ${pfTargets.error}`)
+    }
+
+    if (aliasIps.success) {
+      console.log(`✅ Alias IPs detected: ${aliasIps.aliases.length > 0 ? aliasIps.aliases.join(', ') : 'none'}`)
+    } else {
+      console.log(`⚠️  Alias IPs unavailable: ${aliasIps.error}`)
+    }
+
+    if (mdnsIp && pfTargets.success && pfTargets.targets.length > 0) {
+      const matchesPf = pfTargets.targets.includes(mdnsIp)
+      if (matchesPf) {
+        console.log(`✅ Alias consistency: mDNS A matches pf rdr target (${mdnsIp})`)
+      } else {
+        console.log(`⚠️  Alias consistency: mDNS A ${mdnsIp} does not match pf rdr targets`)
+        allGood = false
+      }
+    }
+  }
+
   // Test direct daemon connectivity
   try {
     const certPem = await fs.readFile(CERT_PATH, 'utf8').catch(() => null)
@@ -897,7 +1061,7 @@ export async function doctorCommand() {
     console.log(`✅ Daemon process running (PID: ${daemonProcess.pid})`)
 
     // Check daemon logs for errors
-    const errLog = '/Volumes/Macintosh HD/Users/vsmith/.navis/logs/daemon.err.log'
+    const errLog = path.join(homedir(), '.navis', 'logs', 'daemon.err.log')
     try {
       const { stdout: recentErrors } = await execWithTimeout(
         `tail -5 "${errLog}" 2>/dev/null | grep -v "No ALTQ" || echo "no recent errors"`,
@@ -919,24 +1083,65 @@ export async function doctorCommand() {
     allGood = false
   }
 
+  console.log('\n🧾 Bridge Logs:')
+  const bridgeStdout = '/var/log/navis-bridge.log'
+  const bridgeStderr = '/var/log/navis-bridge.err'
+  try {
+    const { stdout: bridgeErr } = await execWithTimeout(
+      `tail -5 "${bridgeStderr}" 2>/dev/null | grep -v "No ALTQ" || echo "no recent errors"`,
+      { timeoutMs: 15000 }
+    )
+    if (bridgeErr && !bridgeErr.includes('no recent errors')) {
+      console.log('⚠️  Bridge stderr (recent):')
+      bridgeErr.split('\n').filter(line => line.trim()).forEach(line => {
+        console.log(`   ${line}`)
+      })
+      allGood = false
+    } else {
+      console.log('✅ Bridge stderr: no recent errors')
+    }
+  } catch {
+    console.log('⚠️  Bridge stderr unavailable (need sudo?)')
+  }
+
+  try {
+    const { stdout: bridgeOut } = await execWithTimeout(
+      `tail -5 "${bridgeStdout}" 2>/dev/null || echo "no logs"`,
+      { timeoutMs: 15000 }
+    )
+    if (bridgeOut && !bridgeOut.includes('no logs')) {
+      console.log('✅ Bridge stdout (recent):')
+      bridgeOut.split('\n').filter(line => line.trim()).forEach(line => {
+        console.log(`   ${line}`)
+      })
+    } else {
+      console.log('⚠️  Bridge stdout empty')
+    }
+  } catch {
+    console.log('⚠️  Bridge stdout unavailable (need sudo?)')
+  }
+
   // Check database dependencies
   console.log('\n📊 Database Dependencies:')
   try {
-    // Check if better-sqlite3 native bindings are available
-    const dbPath = '/Volumes/Macintosh HD/Users/vsmith/navisai/node_modules/.pnpm/better-sqlite3@9.6.0/node_modules/better-sqlite3/build/better_sqlite3.node'
-    try {
-      await fs.access(dbPath)
-      console.log('✅ Native SQLite bindings found')
-    } catch {
-      console.log('⚠️  Native SQLite bindings not found (optional per architecture)')
-      console.log('   Daemon will run without persistent storage')
+    const repoRoot = await findRepoRoot(process.cwd())
+    if (!repoRoot) {
+      console.log('ℹ️  Skipping native SQLite check (not running inside repo)')
+    } else {
+      try {
+        require.resolve('better-sqlite3', { paths: [repoRoot] })
+        console.log('✅ Native SQLite module detected (better-sqlite3)')
+      } catch {
+        console.log('⚠️  Native SQLite module not found (optional)')
+        console.log('   Daemon will run without persistent storage')
+      }
     }
   } catch (e) {
     console.log('⚠️  Could not check database dependencies')
   }
 
   // Check log directory
-  const logDir = '/Volumes/Macintosh HD/Users/vsmith/.navis/logs'
+  const logDir = path.join(homedir(), '.navis', 'logs')
   try {
     await fs.access(logDir)
     console.log('✅ Log directory exists:', logDir)
@@ -945,7 +1150,7 @@ export async function doctorCommand() {
   }
 
   // Check data directory
-  const dataDir = '/Volumes/Macintosh HD/Users/vsmith/.navis'
+  const dataDir = path.join(homedir(), '.navis')
   try {
     await fs.access(dataDir)
     console.log('✅ Data directory exists:', dataDir)
@@ -953,183 +1158,84 @@ export async function doctorCommand() {
     console.log('⚠️  Data directory not found, will be created')
   }
 
-  console.log('\n📁 File System & Code Quality:')
-
-  // Check file linting and syntax
-  try {
-    const projectRoot = '/Volumes/Macintosh HD/Users/vsmith/navisai'
-
-    // 1. Check critical files for syntax errors
-    const criticalFiles = [
-      'apps/daemon/daemon.js',
-      'apps/daemon/src/index.js',
-      'apps/cli/src/commands.js',
-      'apps/pwa/src/lib/api/client.ts'
-    ]
-
-    console.log('  🔍 Syntax validation:')
-    for (const file of criticalFiles) {
-      const fullPath = path.join(projectRoot, file)
-      try {
-        await fs.access(fullPath)
-        const ext = path.extname(file)
-        const checkCmd = ext === '.ts' ? `tsc --noEmit "${fullPath}"` : `node -c "${fullPath}"`
-        await execAsync(`${checkCmd} 2>&1`)
-        console.log(`   ✅ ${file}`)
-      } catch (error) {
-        console.log(`   ❌ ${file}:`)
-        error.stdout?.split('\n').filter(line => line.trim()).forEach(line => {
-          console.log(`      ${line}`)
-        })
-        if (error.stderr) {
-          error.stderr.split('\n').filter(line => line.trim()).forEach(line => {
-            console.log(`      ${line}`)
-          })
-        }
-        allGood = false
-      }
-    }
-
-    // 2. Check package.json files
-    console.log('  📦 Package validation:')
-    const packageJsons = [
-      'package.json',
-      'apps/daemon/package.json',
-      'apps/cli/package.json',
-      'apps/pwa/package.json'
-    ]
-
-    for (const pkgPath of packageJsons) {
-      const fullPath = path.join(projectRoot, pkgPath)
-      try {
-        const content = await fs.readFile(fullPath, 'utf8')
-        JSON.parse(content)
-        console.log(`   ✅ ${pkgPath}`)
-      } catch (error) {
-        console.log(`   ❌ ${pkgPath}: ${error.message}`)
-        allGood = false
-      }
-    }
-
-    // 3. Check for required documentation
-    console.log('  📚 Documentation check:')
-    const requiredDocs = [
-      'docs/NETWORKING.md',
-      'docs/SECURITY.md',
-      'docs/SETUP.md',
-      'docs/BEADS_WORKFLOW.md',
-      'docs/IPC_TRANSPORT.md'
-    ]
-
-    for (const docPath of requiredDocs) {
-      const fullPath = path.join(projectRoot, docPath)
-      try {
-        await fs.access(fullPath)
-        const stats = await fs.stat(fullPath)
-        if (stats.size > 100) {
-          console.log(`   ✅ ${docPath}`)
-        } else {
-          console.log(`   ⚠️  ${docPath} (too small)`)
-        }
-      } catch (error) {
-        console.log(`   ❌ ${docPath}: missing`)
-        allGood = false
-      }
-    }
-
-    // 4. Run architecture verification if available
-    console.log('  🏗️  Architecture verification:')
+  const repoRoot = await findRepoRoot(process.cwd())
+  if (repoRoot) {
+    console.log('\n📁 Repo Checks (dev only):')
     try {
-      const { stdout: verifyOutput } = await execWithTimeout('pnpm verify:arch 2>&1', { cwd: projectRoot, timeoutMs: 15000 })
-      if (verifyOutput.includes('✅')) {
-        console.log('   ✅ Architecture compliance verified')
-      } else {
-        console.log('   ⚠️  Architecture issues detected')
-        verifyOutput.split('\n').forEach(line => {
-          if (line.trim()) console.log(`      ${line}`)
-        })
-      }
-    } catch (error) {
-      console.log('   ⚠️  Could not run architecture verification')
-      if (error.stdout) {
-        error.stdout.split('\n').forEach(line => {
-          if (line.trim() && !line.includes('Command failed')) {
-            console.log(`      ${line}`)
-          }
-        })
-      }
-    }
+      // Check package.json files
+      console.log('  📦 Package validation:')
+      const packageJsons = [
+        'package.json',
+        'apps/daemon/package.json',
+        'apps/cli/package.json',
+        'apps/pwa/package.json'
+      ]
 
-    // 5. Check ESLint configuration
-    console.log('  🔧 Linting configuration:')
-    try {
-      await fs.access(path.join(projectRoot, '.eslintrc.js'))
-      console.log('   ✅ ESLint configuration found')
-
-      // Try to run ESLint on critical files
-      try {
-        const { stdout } = await execAsync('npx eslint apps/daemon/daemon.js --format=compact 2>&1 || true', { cwd: projectRoot })
-        if (stdout.trim() === '') {
-          console.log('   ✅ Daemon file passes linting')
-        } else {
-          console.log('   ⚠️  Linting issues in daemon.js:')
-          stdout.split('\n').slice(0, 5).forEach(line => {
-            if (line.trim()) console.log(`      ${line}`)
-          })
-        }
-      } catch (error) {
-        console.log('   ⚠️  Could not run ESLint')
-      }
-    } catch {
-      console.log('   ⚠️  No ESLint configuration found')
-    }
-
-    // 6. Check for circular dependencies
-    console.log('  🔄 Dependency check:')
-    try {
-      const { stdout: madgeOutput } = await execAsync('npx madge --circular apps/ 2>&1 || true', { cwd: projectRoot })
-      if (madgeOutput.includes('0 circular')) {
-        console.log('   ✅ No circular dependencies found')
-      } else if (madgeOutput.includes('found')) {
-        console.log('   ⚠️  Circular dependencies detected')
-      }
-    } catch {
-      console.log('   ⚠️  Could not check for circular dependencies')
-    }
-
-    // 7. Check NavisDaemon class structure
-    console.log('  🏛️  Daemon class structure:')
-    try {
-      const daemonPath = path.join(projectRoot, 'apps/daemon/daemon.js')
-      const content = await fs.readFile(daemonPath, 'utf8')
-
-      // Check if setupRoutes and subsequent methods are properly indented
-      const setupRoutesMatch = content.match(/^(\s*)async setupRoutes\(\)/m)
-      if (setupRoutesMatch) {
-        const indent = setupRoutesMatch[1]
-        if (indent.length === 4) {
-          console.log('   ✅ Methods properly indented inside NavisDaemon class')
-        } else {
-          console.log(`   ❌ setupRoutes() has incorrect indentation (${indent.length} spaces, should be 4)`)
+      for (const pkgPath of packageJsons) {
+        const fullPath = path.join(repoRoot, pkgPath)
+        try {
+          const content = await fs.readFile(fullPath, 'utf8')
+          JSON.parse(content)
+          console.log(`   ✅ ${pkgPath}`)
+        } catch (error) {
+          console.log(`   ❌ ${pkgPath}: ${error.message}`)
           allGood = false
         }
       }
 
-      // Check if class has proper closing
-      const classMatch = content.match(/export class NavisDaemon \{[\s\S]*?^(\s*)\}/m)
-      if (classMatch) {
-        console.log('   ✅ NavisDaemon class properly closed')
-      } else {
-        console.log('   ❌ NavisDaemon class structure issue detected')
-        allGood = false
+      // Check for required documentation
+      console.log('  📚 Documentation check:')
+      const requiredDocs = [
+        'docs/NETWORKING.md',
+        'docs/SECURITY.md',
+        'docs/SETUP.md',
+        'docs/BEADS_WORKFLOW.md',
+        'docs/IPC_TRANSPORT.md'
+      ]
+
+      for (const docPath of requiredDocs) {
+        const fullPath = path.join(repoRoot, docPath)
+        try {
+          await fs.access(fullPath)
+          const stats = await fs.stat(fullPath)
+          if (stats.size > 100) {
+            console.log(`   ✅ ${docPath}`)
+          } else {
+            console.log(`   ⚠️  ${docPath} (too small)`)
+          }
+        } catch {
+          console.log(`   ❌ ${docPath}: missing`)
+          allGood = false
+        }
+      }
+
+      // Run architecture verification if available
+      console.log('  🏗️  Architecture verification:')
+      try {
+        const { stdout: verifyOutput } = await execWithTimeout('pnpm verify:arch 2>&1', { cwd: repoRoot, timeoutMs: 15000 })
+        if (verifyOutput.includes('✅')) {
+          console.log('   ✅ Architecture compliance verified')
+        } else {
+          console.log('   ⚠️  Architecture issues detected')
+          verifyOutput.split('\n').forEach(line => {
+            if (line.trim()) console.log(`      ${line}`)
+          })
+        }
+      } catch (error) {
+        console.log('   ⚠️  Could not run architecture verification')
+        if (error.stdout) {
+          error.stdout.split('\n').forEach(line => {
+            if (line.trim() && !line.includes('Command failed')) {
+              console.log(`      ${line}`)
+            }
+          })
+        }
       }
     } catch (error) {
-      console.log('   ⚠️  Could not verify daemon class structure')
+      console.log('   ⚠️  Repo checks failed:', error.message)
     }
-
-  } catch (error) {
-    console.log('   ❌ File system check failed:', error.message)
-    allGood = false
+  } else {
+    console.log('\n📁 Repo Checks (dev only): skipped (not running inside repo)')
   }
 
   console.log('\n🌐 Network Configuration:')
@@ -1144,7 +1250,7 @@ export async function doctorCommand() {
       // Test packet forwarding rules
       try {
         // Check NAT rules in correct anchor
-        const { stdout: natRules } = await execAsync('sudo pfctl -a navisai/proxy -s nat 2>/dev/null || echo "no nat rules"')
+        const { stdout: natRules } = await execWithTimeout('sudo -n pfctl -a navisai/proxy -s nat 2>/dev/null || echo "no nat rules"')
         if (natRules.includes('rdr') && natRules.includes('443') && natRules.includes('127.0.0.1')) {
           console.log('✅ Packet forwarding: NAT rules configured for 443 → 8443 (navisai/proxy)')
         } else {
@@ -1154,7 +1260,7 @@ export async function doctorCommand() {
         }
 
         // Check filter rules
-        const { stdout: filterRules } = await execAsync('sudo pfctl -a navisai/filter -s rules 2>/dev/null || echo "no filter rules"')
+        const { stdout: filterRules } = await execWithTimeout('sudo -n pfctl -a navisai/filter -s rules 2>/dev/null || echo "no filter rules"')
         if (filterRules.includes('keep state')) {
           console.log('✅ Packet forwarding: Filter rules configured (navisai/filter)')
         } else {
@@ -1163,7 +1269,7 @@ export async function doctorCommand() {
         }
 
         // Check if pf is enabled
-        const { stdout: pfEnabled } = await execAsync('sudo pfctl -s info 2>/dev/null | grep "Status: Enabled" || echo "disabled"')
+        const { stdout: pfEnabled } = await execWithTimeout('sudo -n pfctl -s info 2>/dev/null | grep "Status: Enabled" || echo "disabled"')
         if (pfEnabled.includes('Enabled')) {
           console.log('✅ Packet filtering: pf is enabled')
         } else {
@@ -1171,14 +1277,13 @@ export async function doctorCommand() {
           allGood = false
         }
       } catch (error) {
-        console.log('⚠️  Packet forwarding: Cannot check pfctl rules (may need sudo)')
-        console.log('   Error:', error.message)
-        allGood = false
+        console.log('⚠️  Packet forwarding: Cannot check pfctl rules without sudo')
+        console.log('   Try: sudo navisai doctor')
       }
 
       // Test if proxy is listening
       try {
-        await execAsync('lsof -i :8443 -sTCP:LISTEN -n -P | grep -q "LISTEN"')
+        await execWithTimeout('lsof -i :8443 -sTCP:LISTEN -n -P | grep -q "LISTEN"')
         console.log('✅ Transparent proxy: Listening on port 8443')
       } catch (error) {
         console.log('⚠️  Transparent proxy: Not listening on port 8443')
