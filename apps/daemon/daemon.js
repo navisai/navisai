@@ -202,7 +202,8 @@ export class NavisDaemon {
           // Keep best-effort `request.url` if parsing fails.
         }
 
-        this.fastify.log.info(
+        // Use shared logger so it is captured by logStore and streams via `navisai logs`.
+        logger.info(
           {
             event: 'navis_access',
             requestId: request.id,
