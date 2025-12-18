@@ -409,12 +409,34 @@ export class NavisDaemon {
 
       this.fastify.setNotFoundHandler((request, reply) => {
         if (request.method === 'GET') {
+          if (request.url === NAVIS_PATHS.welcome) {
+            this.fastify.log.info(
+              {
+                event: 'lan_welcome_request',
+                path: request.url,
+                method: request.method,
+                remoteAddress: request.ip,
+                userAgent: request.headers['user-agent'] ?? null,
+              },
+              'Welcome page requested'
+            )
+          }
           return reply.sendFile('index.html')
         }
         reply.code(404).send({ error: 'Not found' })
       })
     } else {
-      this.fastify.get(NAVIS_PATHS.welcome, async () => {
+      this.fastify.get(NAVIS_PATHS.welcome, async (request) => {
+        this.fastify.log.info(
+          {
+            event: 'lan_welcome_request',
+            path: request.url,
+            method: request.method,
+            remoteAddress: request.ip,
+            userAgent: request.headers['user-agent'] ?? null,
+          },
+          'Welcome page requested (fallback HTML)'
+        )
         return `<!doctype html>
 <html>
       <head>
