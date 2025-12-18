@@ -42,45 +42,99 @@ export class TransparentHTTPSProxy {
    * @returns {string|null} - SNI hostname or null if not found
    */
   extractSNI(data) {
-    // TLS Client Hello structure:
-    // 0-1: Content type (0x16 = handshake)
-    // 2-4: TLS version (0x0301 = TLS 1.0)
-    // 5-8: Length of handshake message
-    // 9: Handshake type (0x01 = Client Hello)
-    // 10-12: Length of Client Hello
-    // 43-45: Session ID length
-    // 46-47: Cipher suites length
-    // Then cipher suites, compression methods, and extensions
-
     try {
-      // Verify this is a TLS Client Hello
-      if (data.length < 100 || data[0] !== 0x16 || data[1] !== 0x03) {
+      // TLS record header: type(1) + version(2) + length(2)
+      if (data.length < 5) {
         return null
       }
 
-      // Parse extensions length (last 2 bytes of handshake header)
-      const extensionsLength = data.readUInt16BE(data.length - 2)
-      let offset = data.length - 2 - extensionsLength
+      // Verify this is a TLS handshake record (0x16) and a TLSv1.x record (0x03xx)
+      if (data[0] !== 0x16 || data[1] !== 0x03) {
+        return null
+      }
+
+      const recordLength = data.readUInt16BE(3)
+      if (recordLength <= 0 || 5 + recordLength > data.length) {
+        return null
+      }
+
+      // Handshake header: msg_type(1) + length(3)
+      const handshakeOffset = 5
+      if (handshakeOffset + 4 > data.length) {
+        return null
+      }
+
+      const handshakeType = data[handshakeOffset]
+      if (handshakeType !== 0x01) {
+        return null
+      }
+
+      const clientHelloOffset = handshakeOffset + 4
+      let offset = clientHelloOffset
+
+      // client_version(2) + random(32)
+      if (offset + 2 + 32 > data.length) {
+        return null
+      }
+      offset += 2 + 32
+
+      // session_id
+      if (offset + 1 > data.length) return null
+      const sessionIdLen = data.readUInt8(offset)
+      offset += 1
+      if (offset + sessionIdLen > data.length) return null
+      offset += sessionIdLen
+
+      // cipher_suites
+      if (offset + 2 > data.length) return null
+      const cipherSuitesLen = data.readUInt16BE(offset)
+      offset += 2
+      if (offset + cipherSuitesLen > data.length) return null
+      offset += cipherSuitesLen
+
+      // compression_methods
+      if (offset + 1 > data.length) return null
+      const compressionMethodsLen = data.readUInt8(offset)
+      offset += 1
+      if (offset + compressionMethodsLen > data.length) return null
+      offset += compressionMethodsLen
+
+      // extensions
+      if (offset === data.length) {
+        return null
+      }
+
+      if (offset + 2 > data.length) return null
+      const extensionsLen = data.readUInt16BE(offset)
+      offset += 2
+      const extensionsEnd = offset + extensionsLen
+      if (extensionsEnd > data.length) return null
 
       // Parse extensions
-      while (offset < data.length - 2) {
-        if (offset + 4 > data.length) break
-
+      while (offset + 4 <= extensionsEnd) {
         const extType = data.readUInt16BE(offset)
         const extLen = data.readUInt16BE(offset + 2)
         offset += 4
+        if (offset + extLen > extensionsEnd) break
 
         if (extType === 0x0000) { // SNI extension
-          if (offset + 5 > data.length) break
+          if (extLen < 2 || offset + 2 > extensionsEnd) break
+          const listLen = data.readUInt16BE(offset)
+          let listOffset = offset + 2
+          const listEnd = Math.min(listOffset + listLen, offset + extLen, extensionsEnd)
 
-          // Skip SNI list length (2 bytes) and entry type (1 byte)
-          // Skip name length (2 bytes) and get name
-          const nameLen = data.readUInt16BE(offset + 3)
-          offset += 5
+          while (listOffset + 3 <= listEnd) {
+            const nameType = data.readUInt8(listOffset)
+            const nameLen = data.readUInt16BE(listOffset + 1)
+            listOffset += 3
+            if (listOffset + nameLen > listEnd) break
 
-          if (offset + nameLen > data.length) break
-
-          return data.toString('utf8', offset, offset + nameLen)
+            if (nameType === 0x00) {
+              return data.toString('utf8', listOffset, listOffset + nameLen)
+            }
+            listOffset += nameLen
+          }
+          break
         }
 
         offset += extLen

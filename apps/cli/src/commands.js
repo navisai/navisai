@@ -118,7 +118,13 @@ function escapeAppleScriptString(value) {
   return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
 }
 
-async function runMacOSAdminShell(shellCommand) {
+async function runMacOSAdminShell(shellCommand, options = {}) {
+  const { preferSudo = false } = options
+  if (preferSudo) {
+    const wrapped = `sh -c '${shellCommand.replaceAll("'", "'\\''")}'`
+    return execAsync(`sudo ${wrapped}`)
+  }
+
   const script = `do shell script "${escapeAppleScriptString(shellCommand)}" with administrator privileges`
   return execAsync(`osascript -e "${escapeAppleScriptString(script)}"`)
 }
@@ -168,6 +174,7 @@ async function installMacOSBridge() {
   const localDir = path.join(homedir(), '.navis', 'bridge')
   const localPlist = path.join(localDir, 'com.navisai.bridge.plist')
   const systemPlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
+  const runnerPath = '/usr/local/libexec/navisai-bridge-runner'
 
   await fs.mkdir(localDir, { recursive: true })
 
@@ -180,7 +187,7 @@ async function installMacOSBridge() {
 
     <key>ProgramArguments</key>
     <array>
-      <string>${nodePath}</string>
+      <string>${runnerPath}</string>
       <string>${bridgeEntrypoint}</string>
       <string>start</string>
     </array>
@@ -252,35 +259,50 @@ load anchor "com.apple" from "/etc/pf.anchors/com.apple"
 
   const shellCommand = [
     'set -euo pipefail',
+    // Install a root-owned runner; launchd can refuse to bootstrap LaunchDaemons that directly
+    // execute user-owned Homebrew binaries (common cause of I/O error on bootstrap).
+    `install -d -m 0755 "/usr/local/libexec"`,
+    `printf '%s\\n' '#!/bin/sh' 'set -e' 'exec \"${nodePath}\" \"$@\"' > \"${runnerPath}\"`,
+    `chmod 0755 "${runnerPath}"`,
+    `chown root:wheel "${runnerPath}"`,
     // Install plist
     `install -m 0644 "${localPlist}" "${systemPlist}"`,
+    `chown root:wheel "${systemPlist}"`,
+    // Ensure log files exist and are writable by launchd (root)
+    `touch /var/log/navis-bridge.log /var/log/navis-bridge.err`,
+    `chown root:wheel /var/log/navis-bridge.log /var/log/navis-bridge.err`,
     // Backup existing pf.conf if it exists and hasn't been backed up
     `if [ -f "${systemPfConf}" ] && [ ! -f "${systemPfConfBackup}" ]; then cp "${systemPfConf}" "${systemPfConfBackup}"; fi`,
     // Install updated pf.conf if it doesn't have navisai anchors
     `if ! grep -q "rdr-anchor \\"navisai/\\"" "${systemPfConf}" 2>/dev/null; then install -m 0644 "${localPfConf}" "${systemPfConf}"; fi`,
     // Load the service
     `launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true`,
-    `launchctl bootstrap system "${systemPlist}"`,
+    // If the service was previously disabled (e.g., via System Settings → Login Items), bootstrap can fail.
     `launchctl enable system/com.navisai.bridge >/dev/null 2>&1 || true`,
+    `launchctl bootstrap system "${systemPlist}"`,
     `launchctl kickstart -k system/com.navisai.bridge >/dev/null 2>&1 || true`,
   ].join('; ')
 
-  await runMacOSAdminShell(shellCommand)
+  await runMacOSAdminShell(shellCommand, { preferSudo: true })
 }
 
 async function uninstallMacOSBridge() {
   const systemPlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
   const systemPfConf = '/etc/pf.conf'
   const systemPfConfBackup = '/etc/pf.conf.backup'
+  const runnerPath = '/usr/local/libexec/navisai-bridge-runner'
+  const systemBridgeDir = '/usr/local/libexec/navisai-bridge'
   const shellCommand = [
     'set -euo pipefail',
     `launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true`,
     `rm -f "${systemPlist}"`,
+    `rm -f "${runnerPath}"`,
+    `rm -rf "${systemBridgeDir}"`,
     // Restore original pf.conf if backup exists
     `if [ -f "${systemPfConfBackup}" ]; then mv "${systemPfConfBackup}" "${systemPfConf}"; fi`,
   ].join('; ')
 
-  await runMacOSAdminShell(shellCommand)
+  await runMacOSAdminShell(shellCommand, { preferSudo: true })
 }
 
 async function launchMacOSSetupApp() {
@@ -349,11 +371,11 @@ export async function setupCommand(options = {}) {
   }
 
   console.log('\nInstalling the Navis Bridge (requires an OS admin prompt)...')
-  const bridgeResult = await installBridge(os)
+  const bridgeResult = os === 'darwin' ? await installMacOSBridge() : await installBridge(os)
 
-  if (bridgeResult.launchctlSucceeded) {
+  if (bridgeResult?.launchctlSucceeded) {
     console.log('✅ Bridge installed and started via launchd: https://navis.local will use port 443 (forwarded to the daemon).')
-  } else if (bridgeResult.manualStartRequired) {
+  } else if (bridgeResult?.manualStartRequired) {
     console.log('⚠️  Bridge installed but launchd service failed to start.')
     console.log('📋 To start the bridge manually, run:')
     console.log('   sudo node apps/daemon/src/bridge.js start')
@@ -365,7 +387,7 @@ export async function setupCommand(options = {}) {
   console.log('\nNext:')
   console.log('- Start Navis: navisai up')
   console.log(`- Open onboarding: ${CANONICAL_ORIGIN}${NAVIS_PATHS.welcome}`)
-  if (bridgeResult.manualStartRequired) {
+  if (bridgeResult?.manualStartRequired) {
     console.log('- If navis.local is not reachable, start the bridge manually as shown above')
   }
 }

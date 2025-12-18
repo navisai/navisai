@@ -68,6 +68,7 @@ export async function installMacOSBridge() {
   const localDir = path.join(homedir(), '.navis', 'bridge')
   const localPlist = path.join(localDir, 'com.navisai.bridge.plist')
   const systemPlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
+  const runnerPath = '/usr/local/libexec/navisai-bridge-runner'
 
   if (!existsSync(localDir)) {
     await import('node:fs/promises').then(({ mkdir }) => mkdir(localDir, { recursive: true }))
@@ -80,12 +81,12 @@ export async function installMacOSBridge() {
     <key>Label</key>
     <string>com.navisai.bridge</string>
 
-    <key>ProgramArguments</key>
-    <array>
-      <string>${nodePath}</string>
-      <string>${bridgeEntrypoint}</string>
-      <string>start</string>
-    </array>
+	    <key>ProgramArguments</key>
+	    <array>
+	      <string>${runnerPath}</string>
+	      <string>${bridgeEntrypoint}</string>
+	      <string>start</string>
+	    </array>
 
     <key>EnvironmentVariables</key>
     <dict>
@@ -153,37 +154,60 @@ load anchor "com.apple" from "/etc/pf.anchors/com.apple"
 
   // Enhanced setup with graceful failure handling
   const shellScript = `#!/bin/bash
-set -uo pipefail
+	set -euo pipefail
 
-# Install plist
-install -m 0644 "${localPlist}" "${systemPlist}"
+	# Install a root-owned runner; launchd can refuse to bootstrap LaunchDaemons that directly
+	# execute user-owned Homebrew binaries (common cause of I/O error on bootstrap).
+	install -d -m 0755 "/usr/local/libexec"
+	cat > "${runnerPath}" <<'NAVIS_RUNNER'
+	#!/bin/sh
+	set -e
+	exec "${nodePath}" "$@"
+	NAVIS_RUNNER
+	chmod 0755 "${runnerPath}"
+	chown root:wheel "${runnerPath}"
 
-# Backup existing pf.conf if it exists and hasn't been backed up
-if [ -f "${systemPfConf}" ] && [ ! -f "${systemPfConfBackup}" ]; then
-  cp "${systemPfConf}" "${systemPfConfBackup}"
-fi
+	# Install plist
+	rm -f "${systemPlist}"
+	install -m 0644 "${localPlist}" "${systemPlist}"
+	chown root:wheel "${systemPlist}"
+
+	# Ensure log files exist and are writable by launchd (root)
+	touch /var/log/navis-bridge.log /var/log/navis-bridge.err
+	chown root:wheel /var/log/navis-bridge.log /var/log/navis-bridge.err
+
+	# Backup existing pf.conf if it exists and hasn't been backed up
+	if [ -f "${systemPfConf}" ] && [ ! -f "${systemPfConfBackup}" ]; then
+	  cp "${systemPfConf}" "${systemPfConfBackup}"
+	fi
 
 # Install updated pf.conf if it doesn't have navisai anchors
 if ! grep -q "rdr-anchor \\"navisai/\\"" "${systemPfConf}" 2>/dev/null; then
   install -m 0644 "${localPfConf}" "${systemPfConf}"
 fi
 
-# Try to load the service with fallback handling
-LAUNCHCTL_SUCCESS=true
-launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true
+	# Try to load the service with fallback handling
+	LAUNCHCTL_SUCCESS=true
+	/bin/launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true
 
-if ! launchctl bootstrap system "${systemPlist}" 2>/dev/null; then
-  LAUNCHCTL_SUCCESS=false
-  echo "WARNING: launchctl bootstrap failed, service will need manual start"
-fi
+	# If the service was previously disabled (e.g., via System Settings → Login Items), bootstrap can fail.
+	/bin/launchctl enable system/com.navisai.bridge >/dev/null 2>&1 || true
+	if /bin/launchctl print-disabled system | grep -q '"com.navisai.bridge" => disabled'; then
+	  echo "ERROR: com.navisai.bridge is disabled; enable failed"
+	  LAUNCHCTL_SUCCESS=false
+	fi
 
-if [ "$LAUNCHCTL_SUCCESS" = true ]; then
-  launchctl enable system/com.navisai.bridge >/dev/null 2>&1 || true
-  launchctl kickstart -k system/com.navisai.bridge >/dev/null 2>&1 || true
-  echo "SUCCESS: Bridge service installed and started via launchd"
-else
-  echo "FALLBACK: Bridge files installed, start manually with: sudo node '${bridgeEntrypoint}' start"
-fi
+	if [ "$LAUNCHCTL_SUCCESS" = true ] && ! /bin/launchctl bootstrap system "${systemPlist}" 2>/dev/null; then
+	  LAUNCHCTL_SUCCESS=false
+	  echo "WARNING: launchctl bootstrap failed, service will need manual start"
+	fi
+
+	if [ "$LAUNCHCTL_SUCCESS" = true ]; then
+	  /bin/launchctl kickstart -k system/com.navisai.bridge >/dev/null 2>&1 || true
+	  echo "SUCCESS: Bridge service installed and started via launchd"
+	else
+	  echo "FALLBACK: Bridge files installed, start manually with: sudo node '${bridgeEntrypoint}' start"
+	fi
 `
 
   const tempScript = path.join(homedir(), '.navis', 'install-bridge.sh')
