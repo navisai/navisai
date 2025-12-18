@@ -295,6 +295,15 @@ export class TransparentHTTPSProxy {
       }
 
       if (sni === 'navis.local') {
+        logger.info(
+          {
+            event: 'navis_tls_connection',
+            sni,
+            remoteAddress: clientSocket.remoteAddress ?? null,
+            remotePort: clientSocket.remotePort ?? null,
+          },
+          'Inbound TLS connection for navis.local'
+        )
         logger.debug(`Routing navis.local to daemon at ${this.options.daemonHost}:${this.options.daemonPort}`)
         targetSocket = createConnection({ host: this.options.daemonHost, port: this.options.daemonPort })
       } else if (this.devServerDetector) {

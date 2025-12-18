@@ -193,6 +193,28 @@ export class NavisDaemon {
         https: sslOptions
       })
 
+      // Access logging (no secrets) - Refs: navisai-eyz
+      this.fastify.addHook('onRequest', async (request) => {
+        let path = request.url
+        try {
+          path = new URL(request.url, 'https://navis.local').pathname
+        } catch {
+          // Keep best-effort `request.url` if parsing fails.
+        }
+
+        this.fastify.log.info(
+          {
+            event: 'navis_access',
+            requestId: request.id,
+            method: request.method,
+            path,
+            remoteAddress: request.ip,
+            userAgent: request.headers['user-agent'] ?? null,
+          },
+          'Navis access attempt'
+        )
+      })
+
 
 
       // Register security middleware - Refs: navisai-zs3
