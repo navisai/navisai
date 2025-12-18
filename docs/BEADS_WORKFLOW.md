@@ -27,8 +27,10 @@ Beads provides persistent agent memory and task tracking for NavisAI's complex, 
 
 **Location**: `.beads/` (Git-tracked) + SQLite cache (local)
 
+**Important**: If you have multiple Beads databases in your directory hierarchy (e.g., a global `~/.beads`), prefer the repo scripts (`pnpm beads:*`) or pass `--db .beads/beads.db` to avoid ambiguity and to ensure clean `--json` output.
+
 **Key Components**:
-- Issues with hash-based IDs (e.g., `bd-a1b2`)
+- Issues with project-scoped IDs (e.g., `navisai-22h`)
 - Dependency types: `blocks`, `related`, `parent-child`, `discovered-from`
 - Labels for NavisAI components and domains
 - Status tracking workflow
@@ -43,8 +45,7 @@ Beads provides persistent agent memory and task tracking for NavisAI's complex, 
 
 **With Claude Code**:
 - Project-local hooks in `.claude/settings.local.json`
-- Automatic `bd prime` for context loading
-- SessionStart and PreCompact hooks
+- SessionStart and PreCompact hooks (if configured)
 
 ---
 
@@ -92,9 +93,9 @@ Beads provides persistent agent memory and task tracking for NavisAI's complex, 
 **Example Issue Creation**:
 ```bash
 bd create "Implement intelligent reverse proxy per NETWORKING.md v0.2" \
-  --type implementation \
-  --labels bridge,networking,feature \
-  --discovered-from "docs/BRIDGE_IMPLEMENTATION.md"
+  -t feature \
+  -l bridge,networking \
+  -d "📋 Governing Documentation: docs/NETWORKING.md v0.2"
 ```
 
 ### 3.3 Dependency Management
@@ -141,7 +142,7 @@ bd create "Implement intelligent reverse proxy per NETWORKING.md v0.2" \
 ### 4.2 Cross-Session Continuity
 
 **Session Start**:
-- Run `bd prime` to load active context
+- Run `bd quickstart` to load project context and recommended workflows
 - Review `in_progress` issues
 - Check for new dependencies
 
@@ -187,7 +188,7 @@ Available commands (added to package.json):
 - `pnpm beads:verify` - Verify Beads integration
 - `pnpm beads:setup` - Initialize Beads for project
 - `pnpm beads:status` - Show current Beads state
-- `pnpm beads:prime` - Load project context
+- `pnpm beads:ready` - Show unblocked issues
 
 ---
 
@@ -198,25 +199,28 @@ Available commands (added to package.json):
 **Feature Implementation**:
 ```bash
 bd create "Implement [FEATURE] per docs/[DOC].md" \
-  --type implementation \
-  --labels feature,[component] \
-  --blocks <parent-issue>
+  -t feature \
+  -l [component] \
+  --deps blocks:<parent-issue> \
+  -d "📋 Governing Documentation: docs/[DOC].md"
 ```
 
 **Bug Fix**:
 ```bash
 bd create "Fix [BUG] in [COMPONENT]" \
-  --type bugfix \
-  --labels bug,[component] \
-  --related <affected-issues>
+  -t bug \
+  -l [component] \
+  --deps related:<affected-issues> \
+  -d "📋 Governing Documentation: docs/[DOC].md"
 ```
 
 **Architecture Work**:
 ```bash
 bd create "Update [COMPONENT] for [ARCHITECTURE-CHANGE]" \
-  --type architecture \
-  --labels architecture,[component] \
-  --discovered-from "docs/[SPEC].md"
+  -t task \
+  -l [component] \
+  --deps discovered-from:<source-issue> \
+  -d "📋 Governing Documentation: docs/[SPEC].md"
 ```
 
 ### 6.2 Commit Message Format
@@ -228,7 +232,7 @@ feat(bridge): implement service detection module
 Implements intelligent service detection per NETWORKING.md v0.2.
 Adds UDP/TCP probe capabilities and service fingerprinting.
 
-Refs: bd-a1b2, bd-c3d4
+Refs: navisai-22h, navisai-zjt
 ```
 
 ---

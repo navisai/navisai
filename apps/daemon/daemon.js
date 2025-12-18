@@ -515,6 +515,21 @@ pnpm --filter @navisai/daemon dev</code></pre>
     }
   }
 
+  async getApprovalHandler(request, reply) {
+    // Refs: navisai-0f0 (authentication middleware applied)
+    const { id } = request.params
+    if (!this.approvalService) {
+      reply.code(404)
+      return { error: 'Approval not found' }
+    }
+    const approval = await this.approvalService.getApproval(id)
+    if (!approval) {
+      reply.code(404)
+      return { error: 'Approval not found' }
+    }
+    return approval
+  }
+
   async approveHandler(request, reply) {
     // Refs: navisai-0f0 (authentication middleware applied)
     const { id } = request.params

@@ -8,13 +8,13 @@ This guide explains how agents should use Beads for task tracking, coordination,
 ```bash
 # Always start your session with:
 cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
-bd prime  # Load project context and current issues
+bd quickstart  # Load project context and recommended workflows
 ```
 
 ### 2. Find Available Work
 ```bash
 # See what work is ready (no blockers):
-bd ready
+pnpm beads:ready
 
 # List all issues with details:
 bd list
@@ -77,6 +77,10 @@ bd update navisai-22h --status done
 ```
 
 ## Required Workflow for NavisAI
+
+### Use the Project Beads DB
+
+If you see a warning about multiple Beads databases in your directory hierarchy, prefer the repo scripts (`pnpm beads:*`) which pin the project DB at `.beads/beads.db`.
 
 ### Documentation References
 ALL Beads issues MUST reference governing documentation:
@@ -166,7 +170,6 @@ When multiple agents work on related tasks:
 ```bash
 pnpm beads:init     # Initialize Beads (already done)
 pnpm beads:setup    # Setup Claude integration
-pnpm beads:prime    # Load context
 pnpm beads:ready    # Find unblocked work
 pnpm beads:status   # Current status
 ```
@@ -180,7 +183,7 @@ Pre-commit hooks automatically:
 ### Claude Integration
 Once `pnpm beads:setup` is run:
 - Claude automatically loads Beads context
-- SessionStart and PreCompact hooks run `bd prime`
+- SessionStart and PreCompact hooks can run `bd quickstart` / `bd ready` (if configured)
 - Issues are available in Claude context
 
 ## Current Issues in NavisAI
@@ -195,7 +198,7 @@ Use `bd ready` to see which issues are unblocked and ready for work.
 
 ## Best Practices
 
-1. **Always** run `bd prime` at session start
+1. **Always** run `bd quickstart` at session start
 2. **Always** reference governing docs in issue descriptions
 3. **Always** add appropriate dependencies
 4. **Always** update status when starting/completing work

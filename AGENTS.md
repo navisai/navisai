@@ -21,16 +21,16 @@ If a conflict exists, **this file overrides Global AGENTS.md** for this reposito
 
 ### Current Architecture Status
 - ✅ **Packet forwarding bridge** implemented (macOS pfctl, Linux iptables, Windows netsh)
-- ❌ **mDNS/Bonjour** - NOT IMPLEMENTED (critical blocker for LAN access)
+- ✅ **mDNS/Bonjour** implemented (bridge advertises `navis.local` on LAN)
 - ✅ **PWA** built and serving at root path
 - ✅ **HTTPS certificate** generation and management
-- ⚠️ **CLI logs** - shows "not implemented"
-- ⚠️ **Doctor diagnostics** - checks old bridge, not packet forwarding
+- ✅ **CLI logs** implemented (log streaming via daemon endpoint)
+- ✅ **Doctor diagnostics** include packet forwarding + mDNS checks (still evolving)
 
 ### Critical Path
-1. **Implement mDNS service advertisement** (navisai-d0n) - BLOCKING
-2. Update CLI doctor for packet forwarding (navisai-jsh)
-3. Implement CLI log streaming (navisai-jma)
+1. **Verify navis.local LAN accessibility end-to-end** (navisai-vvi, navisai-bkx)
+2. **Fix macOS pf localhost redirect limitation** (navisai-5zu)
+3. **Stabilize bridge service auto-start** (navisai-0kn)
 
 ---
 
@@ -39,7 +39,7 @@ If a conflict exists, **this file overrides Global AGENTS.md** for this reposito
 ```bash
 cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
 bd quickstart   # Load project context
-bd ready    # Find work to do
+pnpm beads:ready # Find work to do (pins project DB)
 bd create "Task" -t task -d "Details"  # Create new issue
 ```
 
@@ -157,8 +157,8 @@ npm install -g beads
 # 3. Setup Claude Code integration (recommended)
 pnpm beads:setup
 
-# 4. Load project context
-bd prime
+# 4. Verify Beads is working
+pnpm beads:status
 ```
 
 **Daily Onboarding (Every Session)**:

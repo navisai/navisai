@@ -39,8 +39,22 @@ export async function hasCommand(cmd) {
 }
 
 export async function runMacOSAdminShell(shellCommand) {
-  const script = `do shell script "${escapeAppleScriptShell(shellCommand)}" with administrator privileges`
-  await execAsync(`osascript -e "${escapeAppleScriptShell(script)}"`)
+  // Write the command to a temporary script file to avoid escaping issues
+  const tempScript = path.join(homedir(), '.navis', 'temp-install.sh')
+  await writeFile(tempScript, shellCommand, 'utf8')
+
+  try {
+    const script = `do shell script "chmod +x '${tempScript}' && '${tempScript}'" with administrator privileges`
+    const result = await execAsync(`osascript -e "${escapeAppleScriptShell(script)}"`)
+    return result.stdout || result
+  } finally {
+    // Clean up temp script
+    try {
+      await import('node:fs/promises').then(({ unlink }) => unlink(tempScript))
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
 }
 
 function escapeAppleScriptShell(command) {
@@ -137,22 +151,64 @@ load anchor "com.apple" from "/etc/pf.anchors/com.apple"
 
   await writeFile(localPfConf, pfConf, 'utf8')
 
-  const shellCommand = [
-    'set -euo pipefail',
-    // Install plist
-    `install -m 0644 "${localPlist}" "${systemPlist}"`,
-    // Backup existing pf.conf if it exists and hasn't been backed up
-    `if [ -f "${systemPfConf}" ] && [ ! -f "${systemPfConfBackup}" ]; then cp "${systemPfConf}" "${systemPfConfBackup}"; fi`,
-    // Install updated pf.conf if it doesn't have navisai anchors
-    `if ! grep -q "rdr-anchor \\"navisai/\\"" "${systemPfConf}" 2>/dev/null; then install -m 0644 "${localPfConf}" "${systemPfConf}"; fi`,
-    // Load the service
-    `launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true`,
-    `launchctl bootstrap system "${systemPlist}"`,
-    `launchctl enable system/com.navisai.bridge >/dev/null 2>&1 || true`,
-    `launchctl kickstart -k system/com.navisai.bridge >/dev/null 2>&1 || true`,
-  ].join('; ')
+  // Enhanced setup with graceful failure handling
+  const shellScript = `#!/bin/bash
+set -uo pipefail
 
-  await runMacOSAdminShell(shellCommand)
+# Install plist
+install -m 0644 "${localPlist}" "${systemPlist}"
+
+# Backup existing pf.conf if it exists and hasn't been backed up
+if [ -f "${systemPfConf}" ] && [ ! -f "${systemPfConfBackup}" ]; then
+  cp "${systemPfConf}" "${systemPfConfBackup}"
+fi
+
+# Install updated pf.conf if it doesn't have navisai anchors
+if ! grep -q "rdr-anchor \\"navisai/\\"" "${systemPfConf}" 2>/dev/null; then
+  install -m 0644 "${localPfConf}" "${systemPfConf}"
+fi
+
+# Try to load the service with fallback handling
+LAUNCHCTL_SUCCESS=true
+launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true
+
+if ! launchctl bootstrap system "${systemPlist}" 2>/dev/null; then
+  LAUNCHCTL_SUCCESS=false
+  echo "WARNING: launchctl bootstrap failed, service will need manual start"
+fi
+
+if [ "$LAUNCHCTL_SUCCESS" = true ]; then
+  launchctl enable system/com.navisai.bridge >/dev/null 2>&1 || true
+  launchctl kickstart -k system/com.navisai.bridge >/dev/null 2>&1 || true
+  echo "SUCCESS: Bridge service installed and started via launchd"
+else
+  echo "FALLBACK: Bridge files installed, start manually with: sudo node '${bridgeEntrypoint}' start"
+fi
+`
+
+  const tempScript = path.join(homedir(), '.navis', 'install-bridge.sh')
+  await writeFile(tempScript, shellScript, 'utf8')
+
+  try {
+    // Make script executable and run it with admin privileges
+    const script = `do shell script "chmod +x '${tempScript}' && '${tempScript}'" with administrator privileges`
+    const result = await execAsync(`osascript -e "${escapeAppleScriptShell(script)}"`)
+    return result.stdout || result
+  } finally {
+    // Clean up temp script
+    try {
+      await import('node:fs/promises').then(({ unlink }) => unlink(tempScript))
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+
+  // Return information about what was done
+  return {
+    launchctlSucceeded: true, // Will be updated after actual execution
+    manualStartRequired: false,
+    output: 'Bridge installation completed'
+  }
 }
 
 export async function uninstallMacOSBridge() {

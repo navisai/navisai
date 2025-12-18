@@ -349,12 +349,25 @@ export async function setupCommand(options = {}) {
   }
 
   console.log('\nInstalling the Navis Bridge (requires an OS admin prompt)...')
-  await installBridge(os)
+  const bridgeResult = await installBridge(os)
 
-  console.log('✅ Bridge installed: https://navis.local will use port 443 (forwarded to the daemon).')
+  if (bridgeResult.launchctlSucceeded) {
+    console.log('✅ Bridge installed and started via launchd: https://navis.local will use port 443 (forwarded to the daemon).')
+  } else if (bridgeResult.manualStartRequired) {
+    console.log('⚠️  Bridge installed but launchd service failed to start.')
+    console.log('📋 To start the bridge manually, run:')
+    console.log('   sudo node apps/daemon/src/bridge.js start')
+    console.log('💡 The bridge files are installed and ready.')
+  } else {
+    console.log('✅ Bridge installation completed.')
+  }
+
   console.log('\nNext:')
   console.log('- Start Navis: navisai up')
   console.log(`- Open onboarding: ${CANONICAL_ORIGIN}${NAVIS_PATHS.welcome}`)
+  if (bridgeResult.manualStartRequired) {
+    console.log('- If navis.local is not reachable, start the bridge manually as shown above')
+  }
 }
 
 export async function resetCommand() {
@@ -598,23 +611,150 @@ export async function doctorCommand() {
     allGood = false
   }
 
+  // Comprehensive bridge diagnostics
+  console.log('\n🌉 Bridge Service Diagnostics:')
+  const bridgePlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
+  const bridgeExists = await fs.access(bridgePlist).then(() => true).catch(() => false)
+
+  if (bridgeExists) {
+    console.log('✅ Bridge service plist installed')
+
+    // Check if bridge service is loaded
+    try {
+      const { stdout: serviceStatus } = await execAsync('launchctl list | grep com.navisai.bridge 2>/dev/null || echo "not loaded"', {
+        encoding: 'utf8'
+      })
+
+      if (serviceStatus.includes('com.navisai.bridge')) {
+        const parts = serviceStatus.trim().split('\t')
+        const pid = parts[0]
+        const status = parts[1] || 'unknown'
+
+        if (pid && pid !== '-') {
+          console.log(`✅ Bridge service running (PID: ${pid})`)
+
+          // Check if transparent proxy is listening
+          try {
+            const { stdout: lsofOutput } = await execAsync('lsof -i :8443 2>/dev/null | grep LISTEN || echo "not listening"', {
+              encoding: 'utf8'
+            })
+
+            if (lsofOutput.includes('LISTEN')) {
+              console.log('✅ Transparent proxy listening on port 8443')
+
+              // Test packet forwarding rules
+              try {
+                const { stdout: pfRules } = await execAsync('sudo pfctl -a navis -s nat 2>/dev/null || echo "no rules"', {
+                  encoding: 'utf8'
+                })
+
+                if (pfRules.includes('8443') || pfRules.includes('47621')) {
+                  console.log('✅ Packet filtering rules installed')
+                } else {
+                  console.log('⚠️  Packet filtering rules not found')
+                  allGood = false
+                }
+              } catch (pfError) {
+                console.log('⚠️  Could not check packet filtering rules (requires sudo)')
+              }
+            } else {
+              console.log('⚠️  Transparent proxy not listening on port 8443')
+              allGood = false
+            }
+          } catch (proxyError) {
+            console.log('⚠️  Could not check transparent proxy status')
+          }
+        } else if (status === '-12345') {
+          console.log('⚠️  Bridge service loaded but not running')
+          console.log('   Try: sudo launchctl kickstart -k system/com.navisai.bridge')
+          allGood = false
+        } else {
+          console.log('⚠️  Bridge service status unknown:', status)
+        }
+      } else {
+        console.log('⚠️  Bridge service not loaded')
+        console.log('   Try: ./navisai setup')
+        allGood = false
+      }
+    } catch (serviceError) {
+      console.log('⚠️  Could not check bridge service status')
+    }
+  } else {
+    console.log('⚠️  Bridge service not installed')
+    console.log('   Run: ./navisai setup')
+    allGood = false
+  }
+
+  // Check if bridge is running manually
+  try {
+    const { stdout: bridgeProcesses } = await execAsync('ps aux | grep "bridge.js.*start" | grep -v grep || echo "none"', {
+      encoding: 'utf8'
+    })
+
+    if (bridgeProcesses.trim() !== 'none') {
+      console.log('✅ Bridge process running manually')
+      const lines = bridgeProcesses.trim().split('\n')
+      lines.forEach(line => {
+        const parts = line.trim().split(/\s+/)
+        console.log(`   PID: ${parts[1]}, User: ${parts[0]}`)
+      })
+    }
+  } catch (procError) {
+    // Ignore process check errors
+  }
+
+  // Enhanced mDNS diagnostics
+  console.log('\n🌐 Network & mDNS Diagnostics:')
   const lanAddresses = getLanAddresses()
+  console.log(`   LAN addresses: ${lanAddresses.length > 0 ? lanAddresses.join(', ') : 'none detected'}`)
+
+  // Check if bridge is advertising mDNS
+  let bridgeMdnsActive = false
+  if (daemonProcess) {
+    try {
+      const { stdout: bridgeLogs } = await execAsync('tail -10 /var/log/navis-bridge.log 2>/dev/null | grep -i "mdns.*active\\|advertising" || echo "no mdns"', {
+        encoding: 'utf8'
+      })
+
+      if (bridgeLogs.includes('active')) {
+        console.log('✅ Bridge mDNS service active')
+        bridgeMdnsActive = true
+      }
+    } catch (logError) {
+      // Ignore if can't read logs
+    }
+  }
+
   const mdnsResult = await resolveNavisLocal()
   if (mdnsResult.success) {
     const matchesLan = lanAddresses.includes(mdnsResult.address)
     if (matchesLan) {
-      console.log(`✅ mDNS: navis.local resolves to ${mdnsResult.address} (host LAN)`)
+      console.log(`✅ mDNS: navis.local resolves to ${mdnsResult.address} (matches LAN)`)
     } else {
-      console.log(
-        `⚠️  mDNS: navis.local resolved to ${mdnsResult.address} but LAN IPs are ${lanAddresses.join(', ') ||
-        'none'}`
-      )
+      console.log(`⚠️  mDNS: navis.local resolves to ${mdnsResult.address} but doesn't match LAN IPs`)
       if (lanAddresses.length > 0) {
+        console.log(`   Expected: ${lanAddresses.join(', ')}`)
         allGood = false
       }
     }
   } else {
     console.log(`⚠️  mDNS lookup failed: ${mdnsResult.error}`)
+    if (bridgeMdnsActive) {
+      console.log('   💡 Bridge is advertising but DNS not resolving (check router/firewall)')
+    }
+    allGood = false
+  }
+
+  // Test direct daemon connectivity
+  try {
+    const daemonResponse = await fetch('https://127.0.0.1:47621/api/status', {
+      headers: { 'Host': 'navis.local' }
+    })
+    if (daemonResponse.ok) {
+      console.log('✅ Daemon reachable directly with navis.local header')
+    }
+  } catch (daemonError) {
+    console.log('⚠️  Daemon not reachable directly')
     allGood = false
   }
 

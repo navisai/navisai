@@ -25,6 +25,8 @@ program
 program
   .command('setup')
   .description('One-time setup for clean https://navis.local LAN access')
+  .option('--skipUI', 'Skip the macOS setup app and use command-line setup')
+  .option('--autoConfirm', 'Automatically confirm all prompts')
   .action(setupCommand)
 
 program

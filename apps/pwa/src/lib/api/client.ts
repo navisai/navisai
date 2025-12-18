@@ -258,10 +258,9 @@ class ApiClient {
 
   async getProjectAnalysis(path: string, refresh = false): Promise<Project> {
     // Refs: navisai-sz8 (project analysis implementation)
-    const url = new URL(`${this.baseURL}/api/discovery/index`, window.location.origin)
     const body = JSON.stringify({ paths: [path], refresh })
 
-    const response = await this.request('POST', url.pathname + url.search, {
+    const response = await this.request('POST', NAVIS_PATHS.discovery.index, {
       body,
       headers: {
         'Content-Type': 'application/json',

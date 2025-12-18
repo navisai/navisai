@@ -54,7 +54,7 @@ function fileExists(path) {
  */
 function getBeadsIssues() {
   try {
-    const output = execSync('bd list --format json', {
+    const output = execSync('bd --db .beads/beads.db list --json', {
       encoding: 'utf8',
       cwd: process.cwd()
     });
@@ -207,7 +207,7 @@ function verifyBeadsCompliance() {
 
     for (const issue of issuesWithoutRequiredDocs) {
       console.log(`# Fix ${issue.id}: ${issue.title}`);
-      console.log(`bd update ${issue.id} --description "Existing description.
+      console.log(`bd --db .beads/beads.db update ${issue.id} --description "Existing description.
 
 📋 Governing Documentation: ${issue.requiredDocs.map(doc => `\`${doc}\``).join(', ')}"`);
       console.log('');

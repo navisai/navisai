@@ -226,9 +226,16 @@ pass in quick inet proto tcp from any to any keep state
 `
 
     try {
-      // Create a temporary file for pf rules
+      // Create a temporary file for pf rules with proper permissions
       const tempFile = '/tmp/pf-navis.conf'
-      writeFileSync(tempFile, pfConf)
+      try {
+        writeFileSync(tempFile, pfConf)
+      } catch (writeError) {
+        // If we can't write to /tmp, try using mktemp
+        const mktempResult = execSync('mktemp -t pf-navis.XXXXXX', { encoding: 'utf8' }).trim()
+        writeFileSync(mktempResult, pfConf)
+        tempFile = mktempResult
+      }
 
       // Load the rules into pf anchor
       execSync(`sudo pfctl -a ${anchorName} -f ${tempFile}`, { stdio: 'inherit' })
