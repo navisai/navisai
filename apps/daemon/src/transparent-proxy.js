@@ -22,6 +22,7 @@ export class TransparentHTTPSProxy {
       daemonHost: options.daemonHost || '127.0.0.1',
       daemonPort: options.daemonPort || 47621,
       enableDevServerDetection: options.enableDevServerDetection !== false,
+      redirectIps: options.redirectIps || null,
       ...options
     }
 
@@ -33,6 +34,10 @@ export class TransparentHTTPSProxy {
   }
 
   getLocalIPv4Addresses() {
+    if (Array.isArray(this.options.redirectIps) && this.options.redirectIps.length > 0) {
+      return this.options.redirectIps
+    }
+
     const addresses = new Set()
     const interfaces = networkInterfaces()
 
@@ -44,6 +49,10 @@ export class TransparentHTTPSProxy {
     }
 
     return [...addresses]
+  }
+
+  setRedirectIps(redirectIps) {
+    this.options.redirectIps = redirectIps
   }
 
   /**

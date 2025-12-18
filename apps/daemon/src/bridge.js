@@ -33,11 +33,68 @@ class PacketForwardingBridge {
     this.isRunning = false
     this.cleanupCommands = []
     this.mdns = null
+    this.lanInterface = null
+    this.lanIp = null
+    this.lanNetmask = null
+    this.navisAliasIp = null
+    this.ipMonitorInterval = null
     this.transparentProxy = new TransparentHTTPSProxy({
       proxyPort: 8443,
       daemonHost: targetHost,
       daemonPort: targetPort
     })
+  }
+
+  getLanInterfaceIPv4() {
+    const interfaces = networkInterfaces()
+    for (const [name, addrs] of Object.entries(interfaces)) {
+      for (const addr of addrs || []) {
+        if (!addr || addr.family !== 'IPv4' || addr.internal) continue
+        return { name, ip: addr.address, netmask: addr.netmask }
+      }
+    }
+    return null
+  }
+
+  ipToInt(ip) {
+    return ip.split('.').reduce((acc, part) => (acc << 8) + Number(part), 0) >>> 0
+  }
+
+  intToIp(int) {
+    return [24, 16, 8, 0].map((shift) => (int >>> shift) & 255).join('.')
+  }
+
+  async ensureNavisAliasIp() {
+    if (this.platform !== 'darwin') return null
+
+    const lan = this.getLanInterfaceIPv4()
+    if (!lan) return null
+
+    this.lanInterface = lan.name
+    this.lanIp = lan.ip
+    this.lanNetmask = lan.netmask
+
+    const base = this.ipToInt(lan.ip)
+    const mask = this.ipToInt(lan.netmask)
+    const network = base & mask
+
+    for (let offset = 1; offset <= 10; offset++) {
+      const candidate = this.intToIp(network | ((base + offset) & ~mask))
+      if (candidate === lan.ip) continue
+
+      try {
+        execSync(`sudo ifconfig ${lan.name} alias ${candidate} ${lan.netmask}`, { stdio: 'pipe' })
+        this.navisAliasIp = candidate
+        this.cleanupCommands.push(`sudo ifconfig ${lan.name} -alias ${candidate} || true`)
+        console.log(`✅ Reserved dedicated IP for navis.local: ${candidate} (${lan.name})`)
+        return candidate
+      } catch {
+        // Try next candidate.
+      }
+    }
+
+    console.log('⚠️  Unable to reserve a dedicated IP alias for navis.local; continuing with primary LAN IP')
+    return null
   }
 
   async start() {
@@ -49,6 +106,12 @@ class PacketForwardingBridge {
 
       // Enable packet forwarding in kernel if needed
       await this.enablePacketForwarding()
+
+      // On macOS, reserve a dedicated IP alias so Navis never fights other :443 tools.
+      const aliasIp = await this.ensureNavisAliasIp()
+      if (aliasIp) {
+        this.transparentProxy.setRedirectIps([aliasIp])
+      }
 
       // Start transparent HTTPS proxy for domain-based routing
       console.log('🔧 Starting transparent HTTPS proxy...')
@@ -114,7 +177,7 @@ class PacketForwardingBridge {
 
   async startMDNS() {
     try {
-      const ip = this.getLanAddress()
+      const ip = this.navisAliasIp || this.getLanAddress()
       if (!ip) {
         console.log('⚠️  mDNS not started: no LAN IPv4 address detected')
         return
@@ -165,12 +228,21 @@ class PacketForwardingBridge {
 
       // Monitor IP changes and update mDNS
       this.ipMonitorInterval = setInterval(() => {
-        const newIp = this.getLanAddress()
-        if (newIp && newIp !== ip) {
-          console.log(`🔄 IP address changed: ${ip} → ${newIp}`)
-          // Re-advertise with new IP
+        const newLan = this.getLanInterfaceIPv4()
+        if (!newLan || !newLan.ip) return
+
+        if (newLan.ip !== this.lanIp) {
+          console.log(`🔄 LAN IP changed: ${this.lanIp} → ${newLan.ip}`)
+          this.lanInterface = newLan.name
+          this.lanIp = newLan.ip
+          this.lanNetmask = newLan.netmask
+        }
+
+        // Re-advertise current target (alias if present, else LAN IP).
+        const advertised = this.navisAliasIp || this.lanIp
+        if (advertised) {
           this.mdns.respond({
-            answers: [{ name: 'navis.local', type: 'A', ttl: 120, data: newIp }],
+            answers: [{ name: 'navis.local', type: 'A', ttl: 120, data: advertised }],
           })
         }
       }, 30000) // Check every 30 seconds
