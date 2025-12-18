@@ -126,6 +126,12 @@ Since packet forwarding operates at the network layer:
 
 If a non‑Navis local HTTPS service starts showing “Not secure” after setup, treat it as a regression: Navis is likely presenting an untrusted certificate for a non‑Navis domain, which violates the coexistence contract (Refs: navisai-288).
 
+**Important macOS dev-tool coexistence notes (ServBay/nginx, etc.)**
+- ServBay and similar tools commonly bind `0.0.0.0:443` and serve multiple local domains via nginx virtual hosts.
+- Navis must be “invisible” to those tools: no TLS MITM, no certificate generation for non‑Navis domains, and no breaking existing nginx routing (Refs: navisai-288, navisai-ms0).
+- macOS pf has a known limitation: traffic originating on the same machine can bypass `rdr` (localhost-origin) rules, so on-host requests to `https://navis.local` may land in the existing `:443` listener (e.g., ServBay’s default vhost) instead of Navis (Refs: navisai-5zu).
+- The long-term fix for true encapsulation is to give `navis.local` a dedicated IP (IP alias) and redirect only that IP, so other `:443` services are never intercepted at all (Refs: navisai-i3s).
+
 ### 5.2 Implementation by Platform
 
 **macOS**:
@@ -133,9 +139,11 @@ If a non‑Navis local HTTPS service starts showing “Not secure” after setup
 # Enable forwarding
 sudo sysctl -w net.inet.ip.forwarding=1
 
-# Domain-based forwarding with transparent HTTPS proxy
-# Redirects port 443 to transparent proxy (port 8443)
-echo "rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port 8443" | sudo pfctl -a navisai/proxy -f -
+# Domain-based forwarding with transparent HTTPS proxy (LAN inbound only)
+# Redirect inbound :443 destined to this host's LAN IP into the proxy (8443).
+# This avoids intercepting outbound HTTPS traffic and avoids creating a loopback-only redirect.
+LAN_IP="192.168.1.71" # example; compute dynamically in setup
+echo "rdr pass inet proto tcp from any to ${LAN_IP} port 443 -> 127.0.0.1 port 8443" | sudo pfctl -a navisai/proxy -f -
 
 # The transparent proxy inspects TLS SNI and routes:
 # - navis.local → 127.0.0.1:47621 (NavisAI daemon)
