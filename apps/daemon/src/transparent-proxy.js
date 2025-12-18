@@ -34,6 +34,12 @@ export class TransparentHTTPSProxy {
     this.connections = new Set()
     this.devServerDetector = null
     this.httpsServers = new Map()
+    this.metrics = {
+      connectionsActive: 0,
+      connectionsTotal: 0,
+      bytesIn: 0,
+      bytesOut: 0,
+    }
   }
 
   getLocalIPv4Addresses() {
@@ -327,6 +333,8 @@ export class TransparentHTTPSProxy {
    */
   handleConnection(clientSocket) {
     this.connections.add(clientSocket)
+    this.metrics.connectionsActive += 1
+    this.metrics.connectionsTotal += 1
 
     // Buffer to capture TLS handshake for SNI extraction
     let targetSocket = null
@@ -355,6 +363,10 @@ export class TransparentHTTPSProxy {
         )
 
         targetSocket = createConnection({ host: this.options.daemonHost, port: this.options.daemonPort })
+
+        targetSocket.on('data', (chunk) => {
+          this.metrics.bytesOut += chunk.length
+        })
 
         targetSocket.on('error', (error) => {
           logger.error('Target socket error:', error)
@@ -388,13 +400,17 @@ export class TransparentHTTPSProxy {
         logger.debug(
           `Passthrough TLS for ${sni} to ${passthroughTarget.host}:${passthroughTarget.port}`
         )
-        targetSocket = createConnection(passthroughTarget)
-      }
+      targetSocket = createConnection(passthroughTarget)
+    }
 
-      targetSocket.on('error', (error) => {
-        logger.error('Target socket error:', error)
-        clientSocket.destroy()
-      })
+    targetSocket.on('data', (chunk) => {
+      this.metrics.bytesOut += chunk.length
+    })
+
+    targetSocket.on('error', (error) => {
+      logger.error('Target socket error:', error)
+      clientSocket.destroy()
+    })
 
       // Forward the first bytes we already consumed, then pipe the rest.
       targetSocket.write(firstPacket)
@@ -408,6 +424,7 @@ export class TransparentHTTPSProxy {
 
     const onData = (chunk) => {
       if (decided) return
+      this.metrics.bytesIn += chunk.length
       buffered.push(chunk)
       bufferedBytes += chunk.length
 
@@ -425,6 +442,7 @@ export class TransparentHTTPSProxy {
     // Handle connection close
     clientSocket.on('close', () => {
       this.connections.delete(clientSocket)
+      this.metrics.connectionsActive = Math.max(0, this.metrics.connectionsActive - 1)
       if (targetSocket && !targetSocket.destroyed) {
         targetSocket.destroy()
       }
@@ -433,10 +451,15 @@ export class TransparentHTTPSProxy {
     clientSocket.on('error', (error) => {
       logger.error('Client socket error:', error)
       this.connections.delete(clientSocket)
+      this.metrics.connectionsActive = Math.max(0, this.metrics.connectionsActive - 1)
       if (targetSocket && !targetSocket.destroyed) {
         targetSocket.destroy()
       }
     })
+  }
+
+  getMetrics() {
+    return { ...this.metrics }
   }
 
   /**
