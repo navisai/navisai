@@ -289,8 +289,32 @@ export class TransparentHTTPSProxy {
       const sni = this.extractSNI(firstPacket)
 
       if (!sni) {
-        logger.warn('No SNI found in TLS handshake')
-        clientSocket.destroy()
+        // Clients connecting by raw IP often omit SNI. For safety, do not MITM.
+        // Default to routing to the Navis daemon since this proxy only sees
+        // traffic already redirected to this host's :443 (Refs: navisai-ms0).
+        logger.warn(
+          {
+            event: 'tls_no_sni',
+            remoteAddress: clientSocket.remoteAddress ?? null,
+            remotePort: clientSocket.remotePort ?? null,
+          },
+          'No SNI found in TLS handshake; routing to daemon'
+        )
+
+        targetSocket = createConnection({ host: this.options.daemonHost, port: this.options.daemonPort })
+
+        targetSocket.on('error', (error) => {
+          logger.error('Target socket error:', error)
+          clientSocket.destroy()
+        })
+
+        targetSocket.write(firstPacket)
+        clientSocket.pipe(targetSocket)
+        targetSocket.pipe(clientSocket)
+
+        targetSocket.on('close', () => {
+          if (!clientSocket.destroyed) clientSocket.destroy()
+        })
         return
       }
 
