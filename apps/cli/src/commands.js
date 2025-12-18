@@ -408,12 +408,35 @@ export async function setupCommand(options = {}) {
     console.log('\nOpening the Navis macOS Setup app...')
     try {
       await launchMacOSSetupApp()
-      console.log('\n✅ Navis macOS Setup completed.')
+      const bridgePlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
+      const bridgeExists = await fs.access(bridgePlist).then(() => true).catch(() => false)
+      const launchd = await checkLaunchdService('com.navisai.bridge')
+
+      if (bridgeExists && launchd.loaded && launchd.state === 'running') {
+        console.log('\n✅ Navis macOS Setup completed (bridge installed + running).')
+        console.log(`🌐 Access at: ${CANONICAL_ORIGIN}`)
+        console.log(`📱 Onboarding: ${CANONICAL_ORIGIN}${NAVIS_PATHS.welcome}`)
+        return
+      }
+
+      console.log('\n⚠️  Setup app completed but bridge is not active.')
+      console.log(`   Plist installed: ${bridgeExists ? 'yes' : 'no'} (${bridgePlist})`)
+      if (launchd.loaded) {
+        console.log(`   launchd state: ${launchd.state ?? 'unknown'}`)
+        if (launchd.lastExitCode) console.log(`   last exit code: ${launchd.lastExitCode}`)
+      } else {
+        console.log('   launchd: not loaded')
+      }
+      console.log('\nNext steps:')
+      console.log(' - Run: ./navisai setup --skip-ui  (CLI installer + explicit admin prompt)')
+      console.log(' - Then: sudo launchctl kickstart -k system/com.navisai.bridge')
+      console.log(' - Recheck: ./navisai doctor')
+      console.log('\nRefs: navisai-45k')
+      process.exit(1)
     } catch (error) {
       console.error('\n❌ Setup app failed:', error.message)
       process.exit(1)
     }
-    return
   }
 
   if (!autoConfirm && !(await confirm('Continue with setup?'))) {
