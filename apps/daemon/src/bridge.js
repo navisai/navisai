@@ -211,53 +211,11 @@ class PacketForwardingBridge {
   }
 
   async setupMacOS() {
-    // macOS uses pfctl for packet filtering and redirection
-    // Redirect port 443 to transparent proxy which handles domain-based routing
-    const anchorName = 'navis'
-    const proxyPort = this.transparentProxy.options.proxyPort
-    const pfConf = `
-# Navis packet forwarding rules
-# Redirect HTTPS traffic to transparent proxy for domain-based routing
-rdr pass inet proto tcp from any to any port 443 -> 127.0.0.1 port ${proxyPort}
-
-# Allow forwarded packets
-pass out quick inet proto tcp from any to any keep state
-pass in quick inet proto tcp from any to any keep state
-`
-
-    try {
-      // Create a temporary file for pf rules with proper permissions
-      const tempFile = '/tmp/pf-navis.conf'
-      try {
-        writeFileSync(tempFile, pfConf)
-      } catch (writeError) {
-        // If we can't write to /tmp, try using mktemp
-        const mktempResult = execSync('mktemp -t pf-navis.XXXXXX', { encoding: 'utf8' }).trim()
-        writeFileSync(mktempResult, pfConf)
-        tempFile = mktempResult
-      }
-
-      // Load the rules into pf anchor
-      execSync(`sudo pfctl -a ${anchorName} -f ${tempFile}`, { stdio: 'inherit' })
-
-      // Enable pf if not already enabled (ignore error if already enabled)
-      try {
-        execSync('sudo pfctl -e', { stdio: 'pipe' })
-      } catch (error) {
-        // pfctl -e fails if pf is already enabled or with certain return codes, which is fine
-        if (!error.message.includes('already enabled') && error.status !== 1) {
-          throw error
-        }
-      }
-
-      // Store cleanup commands
-      this.cleanupCommands.push(`sudo pfctl -a ${anchorName} -F all`)
-      this.cleanupCommands.push(`rm -f ${tempFile}`)
-
-      console.log('✅ macOS pfctl rules installed (redirecting to transparent proxy)')
-    } catch (error) {
-      throw new Error(`Failed to setup macOS packet forwarding: ${error.message}`)
-    }
+    // macOS packet forwarding is managed by TransparentHTTPSProxy.createPfRules(),
+    // which installs scoped rules into the navisai/* anchors.
+    // Avoid loading a second, broad ruleset into a separate anchor (navis),
+    // which can break coexistence with other HTTPS dev tools (Refs: navisai-46m).
+    console.log('✅ macOS pfctl rules managed by transparent proxy (navisai/* anchors)')
   }
 
   async setupLinux() {
