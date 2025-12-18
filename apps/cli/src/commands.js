@@ -661,7 +661,8 @@ async function checkLaunchdService(label) {
     const state = stdout.match(/\\bstate = (\\w+)/)?.[1] ?? null
     const pid = stdout.match(/\\bpid = (\\d+)/)?.[1] ?? null
     const lastExitCode = stdout.match(/\\blast exit code = (\\d+)/)?.[1] ?? null
-    return { supported: true, loaded: true, state, pid, lastExitCode }
+    const mayBePermissionLimited = !stdout.includes('state =') && !stdout.includes('pid =')
+    return { supported: true, loaded: true, state, pid, lastExitCode, mayBePermissionLimited }
   } catch (error) {
     return { supported: true, loaded: null, error: error.message }
   }
@@ -732,6 +733,7 @@ export async function doctorCommand() {
   console.log('\n🌉 Bridge Service Diagnostics:')
   const bridgePlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
   const bridgeExists = await fs.access(bridgePlist).then(() => true).catch(() => false)
+  let bridgeRunningProcess = null
 
   if (bridgeExists) {
     console.log('✅ Bridge service plist installed')
@@ -742,11 +744,14 @@ export async function doctorCommand() {
       if (isRunning) {
         console.log(`✅ Bridge service running via launchd (PID: ${launchd.pid})`)
       } else {
-        console.log('⚠️  Bridge service installed but not running via launchd')
+        console.log('⚠️  Bridge service installed but not confirmed running via launchd')
         if (launchd.state) console.log(`   state: ${launchd.state}`)
         if (launchd.lastExitCode) console.log(`   last exit code: ${launchd.lastExitCode}`)
-        console.log('   Try: sudo launchctl kickstart -k system/com.navisai.bridge')
-        allGood = false
+        if (launchd.mayBePermissionLimited) {
+          console.log('   ℹ️  launchctl output may be permission-limited; checking for a running bridge process...')
+        } else {
+          console.log('   Try: sudo launchctl kickstart -k system/com.navisai.bridge')
+        }
       }
     } else if (launchd.supported && launchd.loaded === false) {
       console.log('⚠️  Bridge service not loaded via launchd')
@@ -772,9 +777,20 @@ export async function doctorCommand() {
         const parts = line.trim().split(/\s+/)
         console.log(`   PID: ${parts[1]}, User: ${parts[0]}`)
       })
+      bridgeRunningProcess = lines[0] ?? null
     }
   } catch (procError) {
     // Ignore process check errors
+  }
+
+  if (bridgeExists && !bridgeRunningProcess) {
+    // If we can’t see the bridge process and launchd didn't confirm running, treat as failure.
+    // (When launchd output is permission-limited, the process check above is our fallback.)
+    const launchd = await checkLaunchdService('com.navisai.bridge')
+    const isRunning = launchd.state === 'running' || Boolean(launchd.pid)
+    if (!isRunning) {
+      allGood = false
+    }
   }
 
   // Enhanced mDNS diagnostics
