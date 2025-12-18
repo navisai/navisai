@@ -210,6 +210,11 @@ async function hasCommand(cmd) {
   }
 }
 
+async function execWithTimeout(command, options = {}) {
+  const { timeoutMs = 15000, ...rest } = options
+  return execAsync(command, { ...rest, timeout: timeoutMs })
+}
+
 async function runLinuxAdminShell(shellCommand) {
   const wrapped = `sh -c '${shellCommand.replaceAll("'", "'\\''")}'`
   if (await hasCommand('pkexec')) {
@@ -693,7 +698,7 @@ export async function doctorCommand() {
 
     for (const check of syntaxChecks) {
       try {
-        await execAsync(`node -c "${check.file}" 2>&1`)
+        await execWithTimeout(`node -c "${check.file}" 2>&1`, { timeoutMs: 15000 })
         console.log(`✅ ${check.name} syntax is valid`)
       } catch (error) {
         console.log(`❌ ${check.name} has syntax errors:`)
@@ -733,7 +738,8 @@ export async function doctorCommand() {
 
     const launchd = await checkLaunchdService('com.navisai.bridge')
     if (launchd.supported && launchd.loaded) {
-      if (launchd.state === 'running' && launchd.pid) {
+      const isRunning = launchd.state === 'running' || Boolean(launchd.pid)
+      if (isRunning) {
         console.log(`✅ Bridge service running via launchd (PID: ${launchd.pid})`)
       } else {
         console.log('⚠️  Bridge service installed but not running via launchd')
@@ -755,7 +761,7 @@ export async function doctorCommand() {
 
   // Check if bridge is running manually
   try {
-    const { stdout: bridgeProcesses } = await execAsync('ps aux | grep "bridge.js.*start" | grep -v grep || echo "none"', {
+    const { stdout: bridgeProcesses } = await execWithTimeout('ps aux | grep "bridge.js.*start" | grep -v grep || echo "none"', {
       encoding: 'utf8'
     })
 
@@ -784,7 +790,7 @@ export async function doctorCommand() {
   let bridgeMdnsActive = false
   if (daemonProcess) {
     try {
-      const { stdout: bridgeLogs } = await execAsync('tail -10 /var/log/navis-bridge.log 2>/dev/null | grep -i "mdns.*active\\|advertising" || echo "no mdns"', {
+      const { stdout: bridgeLogs } = await execWithTimeout('tail -10 /var/log/navis-bridge.log 2>/dev/null | grep -i "mdns.*active\\|advertising" || echo "no mdns"', {
         encoding: 'utf8'
       })
 
@@ -877,7 +883,10 @@ export async function doctorCommand() {
     // Check daemon logs for errors
     const errLog = '/Volumes/Macintosh HD/Users/vsmith/.navis/logs/daemon.err.log'
     try {
-      const { stdout: recentErrors } = await execAsync(`tail -5 "${errLog}" 2>/dev/null | grep -v "No ALTQ" || echo "no recent errors"`)
+      const { stdout: recentErrors } = await execWithTimeout(
+        `tail -5 "${errLog}" 2>/dev/null | grep -v "No ALTQ" || echo "no recent errors"`,
+        { timeoutMs: 15000 }
+      )
       if (recentErrors && !recentErrors.includes('no recent errors')) {
         console.log('⚠️  Recent daemon errors detected:')
         recentErrors.split('\n').filter(line => line.trim()).forEach(line => {
@@ -1015,7 +1024,7 @@ export async function doctorCommand() {
     // 4. Run architecture verification if available
     console.log('  🏗️  Architecture verification:')
     try {
-      const { stdout: verifyOutput } = await execAsync('pnpm verify:arch 2>&1', { cwd: projectRoot })
+      const { stdout: verifyOutput } = await execWithTimeout('pnpm verify:arch 2>&1', { cwd: projectRoot, timeoutMs: 15000 })
       if (verifyOutput.includes('✅')) {
         console.log('   ✅ Architecture compliance verified')
       } else {
