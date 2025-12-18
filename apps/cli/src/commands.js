@@ -624,6 +624,21 @@ export async function statusCommand() {
   }
 }
 
+async function checkLaunchdService(label) {
+  if (platform() !== 'darwin') return { supported: false }
+
+  try {
+    const { stdout } = await execAsync(`launchctl print system/${label} 2>/dev/null || true`, { encoding: 'utf8' })
+    if (!stdout.trim()) return { supported: true, loaded: false }
+    const state = stdout.match(/\\bstate = (\\w+)/)?.[1] ?? null
+    const pid = stdout.match(/\\bpid = (\\d+)/)?.[1] ?? null
+    const lastExitCode = stdout.match(/\\blast exit code = (\\d+)/)?.[1] ?? null
+    return { supported: true, loaded: true, state, pid, lastExitCode }
+  } catch (error) {
+    return { supported: true, loaded: null, error: error.message }
+  }
+}
+
 export async function doctorCommand() {
   console.log('Running Navis diagnostics...\n')
 
@@ -693,65 +708,21 @@ export async function doctorCommand() {
   if (bridgeExists) {
     console.log('✅ Bridge service plist installed')
 
-    // Check if bridge service is loaded
-    try {
-      const { stdout: serviceStatus } = await execAsync('launchctl list | grep com.navisai.bridge 2>/dev/null || echo "not loaded"', {
-        encoding: 'utf8'
-      })
-
-      if (serviceStatus.includes('com.navisai.bridge')) {
-        const parts = serviceStatus.trim().split('\t')
-        const pid = parts[0]
-        const status = parts[1] || 'unknown'
-
-        if (pid && pid !== '-') {
-          console.log(`✅ Bridge service running (PID: ${pid})`)
-
-          // Check if transparent proxy is listening
-          try {
-            const { stdout: lsofOutput } = await execAsync('lsof -i :8443 2>/dev/null | grep LISTEN || echo "not listening"', {
-              encoding: 'utf8'
-            })
-
-            if (lsofOutput.includes('LISTEN')) {
-              console.log('✅ Transparent proxy listening on port 8443')
-
-              // Test packet forwarding rules
-              try {
-                const { stdout: pfRules } = await execAsync('sudo pfctl -a navis -s nat 2>/dev/null || echo "no rules"', {
-                  encoding: 'utf8'
-                })
-
-                if (pfRules.includes('8443') || pfRules.includes('47621')) {
-                  console.log('✅ Packet filtering rules installed')
-                } else {
-                  console.log('⚠️  Packet filtering rules not found')
-                  allGood = false
-                }
-              } catch (pfError) {
-                console.log('⚠️  Could not check packet filtering rules (requires sudo)')
-              }
-            } else {
-              console.log('⚠️  Transparent proxy not listening on port 8443')
-              allGood = false
-            }
-          } catch (proxyError) {
-            console.log('⚠️  Could not check transparent proxy status')
-          }
-        } else if (status === '-12345') {
-          console.log('⚠️  Bridge service loaded but not running')
-          console.log('   Try: sudo launchctl kickstart -k system/com.navisai.bridge')
-          allGood = false
-        } else {
-          console.log('⚠️  Bridge service status unknown:', status)
-        }
+    const launchd = await checkLaunchdService('com.navisai.bridge')
+    if (launchd.supported && launchd.loaded) {
+      if (launchd.state === 'running' && launchd.pid) {
+        console.log(`✅ Bridge service running via launchd (PID: ${launchd.pid})`)
       } else {
-        console.log('⚠️  Bridge service not loaded')
-        console.log('   Try: ./navisai setup')
+        console.log('⚠️  Bridge service installed but not running via launchd')
+        if (launchd.state) console.log(`   state: ${launchd.state}`)
+        if (launchd.lastExitCode) console.log(`   last exit code: ${launchd.lastExitCode}`)
+        console.log('   Try: sudo launchctl kickstart -k system/com.navisai.bridge')
         allGood = false
       }
-    } catch (serviceError) {
-      console.log('⚠️  Could not check bridge service status')
+    } else if (launchd.supported && launchd.loaded === false) {
+      console.log('⚠️  Bridge service not loaded via launchd')
+      console.log('   Try: ./navisai setup')
+      allGood = false
     }
   } else {
     console.log('⚠️  Bridge service not installed')
@@ -843,8 +814,13 @@ export async function doctorCommand() {
 
   // Test direct daemon connectivity
   try {
+    const certPem = await fs.readFile(CERT_PATH, 'utf8').catch(() => null)
+    const dispatcher = new UndiciAgent({
+      connect: certPem ? { ca: certPem } : { rejectUnauthorized: false },
+    })
     const daemonResponse = await fetch('https://127.0.0.1:47621/status', {
-      headers: { 'Host': 'navis.local' }
+      headers: { Host: 'navis.local' },
+      dispatcher,
     })
     if (daemonResponse.ok) {
       console.log('✅ Daemon reachable directly with navis.local header')
