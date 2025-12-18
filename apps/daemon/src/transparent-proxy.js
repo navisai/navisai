@@ -11,12 +11,9 @@
 
 import { createConnection, createServer } from 'node:net'
 import { spawn } from 'node:child_process'
-import { createServer as createHttpsServer } from 'node:https'
-import { join } from 'node:path'
-import { homedir } from 'node:os'
+import { networkInterfaces } from 'node:os'
 import { logger } from '@navisai/logging'
 import { DevServerDetector } from './dev-server-detector.js'
-import { CertificateManager } from './certificate-manager.js'
 
 export class TransparentHTTPSProxy {
   constructor(options = {}) {
@@ -32,8 +29,21 @@ export class TransparentHTTPSProxy {
     this.isRunning = false
     this.connections = new Set()
     this.devServerDetector = null
-    this.certificateManager = null
     this.httpsServers = new Map()
+  }
+
+  getLocalIPv4Addresses() {
+    const addresses = new Set()
+    const interfaces = networkInterfaces()
+
+    for (const addrs of Object.values(interfaces)) {
+      for (const addr of addrs || []) {
+        if (!addr || addr.family !== 'IPv4' || addr.internal) continue
+        addresses.add(addr.address)
+      }
+    }
+
+    return [...addresses]
   }
 
   /**
@@ -150,13 +160,20 @@ export class TransparentHTTPSProxy {
    * Create pfctl rules for redirecting port 443 to our proxy
    */
   async createPfRules() {
-    const natRules = [
-      `rdr pass inet proto tcp from any to any port 443 -> 127.0.0.1 port ${this.options.proxyPort}`
-    ]
+    const localIps = this.getLocalIPv4Addresses()
 
-    const filterRules = [
-      `pass out quick inet proto tcp from any to any port 443 keep state`
-    ]
+    if (localIps.length === 0) {
+      throw new Error('No non-loopback IPv4 addresses found; refusing to redirect all :443 traffic')
+    }
+
+    const natRules = localIps.map(
+      (ip) =>
+        `rdr pass inet proto tcp from any to ${ip} port 443 -> 127.0.0.1 port ${this.options.proxyPort}`
+    )
+
+    const filterRules = localIps.map(
+      (ip) => `pass in quick inet proto tcp from any to ${ip} port 443 keep state`
+    )
 
     const natConfig = natRules.join('\n')
     const filterConfig = filterRules.join('\n')
@@ -214,14 +231,6 @@ export class TransparentHTTPSProxy {
       // Load pf rules to redirect port 443
       await this.createPfRules()
 
-      // Initialize certificate manager
-      this.certificateManager = new CertificateManager({
-        dataDir: join(homedir(), '.navis'),
-        validityDays: 90
-      })
-      await this.certificateManager.initialize()
-      logger.info('Certificate manager initialized')
-
       // Initialize dev server detector if enabled
       if (this.options.enableDevServerDetection) {
         this.devServerDetector = new DevServerDetector({
@@ -274,117 +283,58 @@ export class TransparentHTTPSProxy {
     this.connections.add(clientSocket)
 
     // Buffer to capture first packet for SNI extraction
-    let firstPacket = null
     let targetSocket = null
-    let httpsServer = null
 
-    clientSocket.on('data', async (data) => {
-      if (!firstPacket) {
-        firstPacket = data
-        const sni = this.extractSNI(data)
+    clientSocket.once('data', async (firstPacket) => {
+      const sni = this.extractSNI(firstPacket)
 
-        if (!sni) {
-          // No SNI found, close connection
-          logger.warn('No SNI found in TLS handshake')
-          clientSocket.destroy()
-          return
-        }
-
-        // Get or create certificate for this domain
-        const certBundle = await this.certificateManager.generateCertificate(sni)
-
-        if (sni === 'navis.local') {
-          // Route to NavisAI daemon
-          logger.debug(`Routing navis.local to daemon at ${this.options.daemonHost}:${this.options.daemonPort}`)
-          targetSocket = createConnection({
-            host: this.options.daemonHost,
-            port: this.options.daemonPort
-          })
-        } else if (sni) {
-          // Check for dev server mappings first
-          if (this.devServerDetector) {
-            const domainMappings = this.devServerDetector.getDomainMappings()
-            const mappedPort = domainMappings.get(sni)
-
-            if (mappedPort) {
-              // Route to mapped dev server
-              logger.debug(`Routing ${sni} to localhost:${mappedPort}`)
-              targetSocket = createConnection({
-                host: '127.0.0.1',
-                port: mappedPort
-              })
-            } else if (sni.endsWith('.localhost') || sni.endsWith('.local')) {
-              // Local domain but not mapped - try to detect the server
-              const port = await this.tryDetectServerForDomain(sni)
-              if (port) {
-                logger.debug(`Routing ${sni} to detected localhost:${port}`)
-                targetSocket = createConnection({
-                  host: '127.0.0.1',
-                  port
-                })
-              } else {
-                logger.warn(`Unknown local domain: ${sni}`)
-                clientSocket.destroy()
-                return
-              }
-            } else {
-              // External domain - route normally
-              logger.debug(`Routing ${sni} to external destination`)
-              targetSocket = createConnection({
-                host: sni,
-                port: 443
-              })
-            }
-          } else {
-            // No dev server detector - route to original destination
-            logger.debug(`Routing ${sni} to original destination`)
-            targetSocket = createConnection({
-              host: sni,
-              port: 443
-            })
-          }
-        } else {
-          // No SNI found, close connection
-          logger.warn('No SNI found in TLS handshake')
-          clientSocket.destroy()
-          return
-        }
-
-        // Set up error handling
-        targetSocket.on('error', (error) => {
-          logger.error('Target socket error:', error)
-          clientSocket.destroy()
-        })
-
-        // Relay first packet
-        targetSocket.write(data)
-
-        // Set up bidirectional data relay
-        clientSocket.on('data', (data) => {
-          if (targetSocket && !targetSocket.destroyed) {
-            targetSocket.write(data)
-          }
-        })
-
-        targetSocket.on('data', (data) => {
-          if (clientSocket && !clientSocket.destroyed) {
-            clientSocket.write(data)
-          }
-        })
-
-        targetSocket.on('close', () => {
-          if (!clientSocket.destroyed) {
-            clientSocket.destroy()
-          }
-        })
-
-        targetSocket.on('error', (error) => {
-          logger.error('Target socket error:', error)
-          if (!clientSocket.destroyed) {
-            clientSocket.destroy()
-          }
-        })
+      if (!sni) {
+        logger.warn('No SNI found in TLS handshake')
+        clientSocket.destroy()
+        return
       }
+
+      if (sni === 'navis.local') {
+        logger.debug(`Routing navis.local to daemon at ${this.options.daemonHost}:${this.options.daemonPort}`)
+        targetSocket = createConnection({ host: this.options.daemonHost, port: this.options.daemonPort })
+      } else if (this.devServerDetector) {
+        const domainMappings = this.devServerDetector.getDomainMappings()
+        const mappedPort = domainMappings.get(sni)
+
+        if (mappedPort) {
+          logger.debug(`Routing ${sni} to localhost:${mappedPort}`)
+          targetSocket = createConnection({ host: '127.0.0.1', port: mappedPort })
+        } else if (sni.endsWith('.localhost') || sni.endsWith('.local')) {
+          const port = await this.tryDetectServerForDomain(sni)
+          if (!port) {
+            logger.warn(`Unknown local domain: ${sni}`)
+            clientSocket.destroy()
+            return
+          }
+          logger.debug(`Routing ${sni} to detected localhost:${port}`)
+          targetSocket = createConnection({ host: '127.0.0.1', port })
+        } else {
+          logger.debug(`Routing ${sni} to external destination`)
+          targetSocket = createConnection({ host: sni, port: 443 })
+        }
+      } else {
+        logger.debug(`Routing ${sni} to original destination`)
+        targetSocket = createConnection({ host: sni, port: 443 })
+      }
+
+      targetSocket.on('error', (error) => {
+        logger.error('Target socket error:', error)
+        clientSocket.destroy()
+      })
+
+      // Forward the first bytes we already consumed, then pipe the rest.
+      targetSocket.write(firstPacket)
+      clientSocket.pipe(targetSocket)
+      targetSocket.pipe(clientSocket)
+
+      targetSocket.on('close', () => {
+        if (!clientSocket.destroyed) clientSocket.destroy()
+      })
     })
 
     // Handle connection close
