@@ -9,6 +9,7 @@ import { createRequire } from 'node:module'
 import readline from 'node:readline/promises'
 import { NAVIS_PATHS } from '@navisai/api-contracts'
 import { installBridge, uninstallBridge } from '@navisai/setup-app/bridge'
+import { Agent as UndiciAgent } from 'undici'
 
 const execAsync = promisify(exec)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -17,6 +18,17 @@ const require = createRequire(import.meta.url)
 const CANONICAL_ORIGIN = 'https://navis.local'
 const CERT_PATH = path.join(homedir(), '.navis', 'certs', 'navis.local.crt')
 const KEY_PATH = path.join(homedir(), '.navis', 'certs', 'navis.local.key')
+
+async function fetchNavis(pathOrUrl, options = {}) {
+  const url = pathOrUrl.startsWith('http') ? pathOrUrl : `${CANONICAL_ORIGIN}${pathOrUrl}`
+
+  const certPem = await fs.readFile(CERT_PATH, 'utf8').catch(() => null)
+  const dispatcher = new UndiciAgent({
+    connect: certPem ? { ca: certPem } : { rejectUnauthorized: false },
+  })
+
+  return fetch(url, { ...options, dispatcher })
+}
 
 function getLanAddresses() {
   const interfaces = networkInterfaces()
@@ -481,7 +493,7 @@ export async function upCommand(options = {}) {
 
       // Check if daemon is responding on the canonical origin
       try {
-        const response = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.status}`)
+        const response = await fetchNavis(NAVIS_PATHS.status)
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         console.log(`🌐 Access at: ${CANONICAL_ORIGIN}`)
         console.log(`📱 Onboarding: ${CANONICAL_ORIGIN}${NAVIS_PATHS.welcome}`)
@@ -552,7 +564,7 @@ export async function statusCommand() {
 
       // Try to get status from API
       try {
-        const response = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.status}`)
+        const response = await fetchNavis(NAVIS_PATHS.status)
         if (response.ok) {
           const status = await response.json()
           console.log('\nDaemon Status:')
@@ -578,6 +590,7 @@ export async function doctorCommand() {
 
   let allGood = true
   const os = platform()
+  const daemonProcess = await findDaemonProcess().catch(() => null)
 
   // Check Node.js version
   const nodeVersion = process.version
@@ -620,7 +633,7 @@ export async function doctorCommand() {
 
   // Check canonical origin reachability (best-effort)
   try {
-    const response = await fetch(`${CANONICAL_ORIGIN}/status`)
+    const response = await fetchNavis('/status')
     if (response.ok) {
       console.log(`✅ Reachable: ${CANONICAL_ORIGIN}`)
     } else {
@@ -798,7 +811,6 @@ export async function doctorCommand() {
   }
 
   // Check daemon process status
-  const daemonProcess = await findDaemonProcess()
   if (daemonProcess) {
     console.log(`✅ Daemon process running (PID: ${daemonProcess.pid})`)
 
@@ -1376,7 +1388,7 @@ export async function scanCommand(path, options = {}) {
     }
 
     // Call daemon API to scan
-    const response = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.discovery.scan}`, {
+    const response = await fetchNavis(NAVIS_PATHS.discovery.scan, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1402,26 +1414,27 @@ export async function scanCommand(path, options = {}) {
 
     console.log(`\n✅ Scan completed! Found ${result.count} projects in "${result.scannedPath}"\n`)
 
-    // Display discovered projects
-    if (result.projects && result.projects.length > 0) {
-      console.log('Discovered Projects:')
-      console.log('===================\n')
+      // Display discovered projects
+      if (result.projects && result.projects.length > 0) {
+        console.log('Discovered Projects:')
+        console.log('===================\n')
 
-      result.projects.forEach((project, index) => {
-        console.log(`${index + 1}. ${project.name}`)
-        console.log(`   Path: ${project.path}`)
-        console.log(`   Type: ${project.classification?.primary?.name || 'Unknown'}`)
-        if (project.detection?.primary?.framework) {
-          console.log(`   Framework: ${project.detection.primary.framework}`)
-        }
-        if (project.classification?.language) {
-          console.log(`   Language: ${project.classification.language}`)
-        }
-        console.log(`   Confidence: ${(project.detection.confidence * 100).toFixed(1)}%`)
-        console.log(`   Detected: ${new Date(project.detectedAt).toLocaleString()}`)
-        console.log('')
-      })
-    } else {
+        result.projects.forEach((project, index) => {
+          const confidence = project?.detection?.confidence
+          console.log(`${index + 1}. ${project.name}`)
+          console.log(`   Path: ${project.path}`)
+          console.log(`   Type: ${project.classification?.primary?.name || 'Unknown'}`)
+          if (project.detection?.primary?.framework) {
+            console.log(`   Framework: ${project.detection.primary.framework}`)
+          }
+          if (project.classification?.language) {
+            console.log(`   Language: ${project.classification.language}`)
+          }
+          console.log(`   Confidence: ${typeof confidence === 'number' ? (confidence * 100).toFixed(1) : 'N/A'}%`)
+          console.log(`   Detected: ${new Date(project.detectedAt).toLocaleString()}`)
+          console.log('')
+        })
+      } else {
       console.log('No projects found. Try scanning a different directory.')
     }
 
@@ -1450,7 +1463,7 @@ export async function indexCommand(paths, options = {}) {
     }
 
     // Call daemon API to index
-    const response = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.discovery.index}`, {
+    const response = await fetchNavis(NAVIS_PATHS.discovery.index, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1504,12 +1517,12 @@ export async function pairCommand(options = {}) {
     if (options.rePair) {
       console.log('🔄 Revoking existing pairings...')
       try {
-        const devicesResponse = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.devices.list}`)
+        const devicesResponse = await fetchNavis(NAVIS_PATHS.devices.list)
         if (devicesResponse.ok) {
           const { devices } = await devicesResponse.json()
           for (const device of devices) {
             if (!device.isRevoked) {
-              await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.devices.revoke(device.id)}`, {
+              await fetchNavis(NAVIS_PATHS.devices.revoke(device.id), {
                 method: 'POST'
               })
               console.log(`   Revoked: ${device.name}`)
@@ -1522,7 +1535,7 @@ export async function pairCommand(options = {}) {
     }
 
     // Get pairing information from daemon
-    const response = await fetch(`${CANONICAL_ORIGIN}${NAVIS_PATHS.pairing.qr}`)
+    const response = await fetchNavis(NAVIS_PATHS.pairing.qr)
     if (!response.ok) {
       console.log('❌ Failed to get pairing information')
       process.exit(1)
