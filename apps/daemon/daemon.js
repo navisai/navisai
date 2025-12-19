@@ -238,14 +238,39 @@ export class NavisDaemon {
       // Configure CORS per IPC_TRANSPORT.md - Refs: navisai-zs3
       await this.fastify.register(cors, {
         origin: (origin, callback) => {
-          // Allow same origin and navis.local
-          if (!origin || origin.includes("navis.local")) {
+          const allowOrigin = (value) => callback(null, value)
+          const isPrivateIp = (hostname) => {
+            if (!hostname) return false
+            if (hostname === 'localhost' || hostname === '127.0.0.1') return true
+            const octets = hostname.split('.').map(Number)
+            if (octets.length === 4 && octets.every(Number.isFinite)) {
+              const [a, b] = octets
+              if (a === 10) return true
+              if (a === 192 && b === 168) return true
+              if (a === 172 && b >= 16 && b <= 31) return true
+            }
+            if (hostname.startsWith('fe80:') || hostname === '::1') return true
+            return false
+          }
+          const isAllowedOrigin = (value) => {
+            if (!value) return true
+            try {
+              const parsed = new URL(value)
+              if (parsed.hostname === 'navis.local') return true
+              if (isPrivateIp(parsed.hostname)) return true
+            } catch {
+              return false
+            }
+            return false
+          }
+          // Allow same origin, navis.local, and private LAN IP origins
+          if (isAllowedOrigin(origin)) {
             return callback(null, true)
           }
           // Check config for additional allowed origins
           const allowedOrigins = this.config.daemon?.allowedOrigins || []
           if (allowedOrigins.includes(origin)) {
-            return callback(null, true)
+            return allowOrigin(true)
           }
           callback(new Error("Not allowed by CORS"))
         },
