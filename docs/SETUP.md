@@ -217,3 +217,35 @@ When `navisai setup` runs (regardless of port 443 usage):
      - Temporarily stop the other service
      - Use a different port for testing
      - Manual proxy configuration
+
+---
+
+## 9. Initial LAN Experience QA Runbook
+
+Use this checklist to validate the first-time LAN experience on a real phone.
+
+### 9.1 Preconditions
+
+- Bridge installed (`navisai setup`)
+- Daemon running (`navisai up`)
+- mDNS enabled on the LAN
+
+### 9.2 Phone onboarding steps
+
+1. On the host, confirm `https://navis.local/status` works in a browser.
+2. On the phone, connect to the same LAN/Wi-Fi.
+3. On the phone, open `https://navis.local/status`.
+   - Expect a certificate warning until the Navis cert is trusted.
+4. Trust the Navis certificate on the phone (platform-specific flow).
+5. Reload `https://navis.local/status` and confirm it succeeds.
+6. Open `https://navis.local/welcome` and confirm the PWA loads.
+7. Start pairing from the onboarding UI and complete the flow.
+
+### 9.3 Expected results
+
+- `navis.local` resolves via mDNS on the phone.
+- `/status` responds over HTTPS without cert errors after trust.
+- `/welcome` loads the PWA and onboarding flow.
+- Pairing completes and device shows as paired.
+
+Refs: navisai-9wk
