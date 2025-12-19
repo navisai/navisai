@@ -900,6 +900,7 @@ export async function doctorCommand() {
   }
 
   const mdnsResult = await resolveNavisLocal()
+  const mdnsIp = mdnsResult.success ? mdnsResult.address : null
   if (mdnsResult.success) {
     const matchesLan = lanAddresses.includes(mdnsResult.address)
     if (matchesLan) {
@@ -954,7 +955,7 @@ export async function doctorCommand() {
       } else {
         console.log(`⚠️  mDNS SRV: unexpected data (${srvResult.line})`)
       }
-      if (srvTarget && mdnsIp && srvTarget !== 'navis.local') {
+    if (srvTarget && mdnsIp && srvTarget !== 'navis.local') {
         console.log(`⚠️  mDNS SRV target mismatch: expected navis.local, got ${srvTarget}`)
         allGood = false
       }
