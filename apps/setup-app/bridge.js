@@ -174,7 +174,16 @@ export async function installMacOSBridge() {
 \tLOG_PATH="${installLogPath}"
 \techo "=== Navis bridge install $(date -u +\"%Y-%m-%dT%H:%M:%SZ\") ===" >> "$LOG_PATH"
 \texec > >(tee -a "$LOG_PATH") 2>&1
+\ttrap 'echo "ERROR: install failed at line $LINENO (status=$?)"' ERR
+\tset -x
 \techo "Step: begin"
+\twhoami
+\tid
+\tpwd
+\tuname -a
+\tcommand -v install || true
+\tls -ld /Library /Library/LaunchDaemons || true
+\tls -ld /usr/local /usr/local/libexec || true
 \t# Navis snapshot gate (mutations must be preceded by a fresh snapshot)
 ${snapshotBlock}
 
@@ -189,12 +198,14 @@ ${snapshotBlock}
 	NAVIS_RUNNER
 	chmod 0755 "${runnerPath}"
 	chown root:wheel "${runnerPath}"
+\tls -l "${runnerPath}" || true
 
 \techo "Step: install plist"
 	# Install plist
 	rm -f "${systemPlist}"
 	install -m 0644 "${localPlist}" "${systemPlist}"
 	chown root:wheel "${systemPlist}"
+\tls -l "${systemPlist}" || true
 
 \techo "Step: ensure log files"
 	# Ensure log files exist and are writable by launchd (root)
