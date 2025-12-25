@@ -153,7 +153,7 @@ export async function installMacOSBridge() {
     'rdr-anchor "navisai/*"',
     'anchor "navisai/*"',
     ''
-  ].join('\\n')
+  ].join('\n')
 
   // Enhanced setup with graceful failure handling
   const snapshotExists = await navisSnapshotExists(previousSnapshot)
