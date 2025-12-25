@@ -254,7 +254,8 @@ function escapeAppleScriptCommand(command) {
   return command.replaceAll('"', '\\\\"').replaceAll('\\n', '\\\\n')
 }
 
-async function runPreflightGate(context) {
+async function runPreflightGate(context, options = {}) {
+  const { requireOclpAck = true } = options
   if (platform() !== 'darwin') return true
   console.log(`\nPreflight checks (${context})...`)
   const result = await runPreflightChecks()
@@ -263,7 +264,7 @@ async function runPreflightGate(context) {
     const oclpDetected = result.checks.some((check) => check.name === 'OCLP detected' && check.detected)
     if (oclpDetected) {
       console.log('⚠️  OCLP detected: stricter safeguards are required.')
-      if (context.startsWith('setup') || context.startsWith('reset')) {
+      if (requireOclpAck && (context.startsWith('setup') || context.startsWith('reset'))) {
         const ok = await confirmTyped(
           'OCLP detected. Proceeding will create a Navis snapshot before mutations.',
           'I UNDERSTAND'
@@ -524,7 +525,7 @@ export async function setupCommand(options = {}) {
   if (os === 'darwin' && !skipUI) {
     console.log('\nOpening the Navis macOS Setup app...')
     try {
-      const preflightOk = await runPreflightGate('setup app')
+      const preflightOk = await runPreflightGate('setup app', { requireOclpAck: false })
       if (!preflightOk) {
         process.exit(1)
       }
