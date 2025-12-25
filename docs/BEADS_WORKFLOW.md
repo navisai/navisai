@@ -223,6 +223,14 @@ bd create "Update [COMPONENT] for [ARCHITECTURE-CHANGE]" \
   -d "📋 Governing Documentation: docs/[SPEC].md"
 ```
 
+### 6.2 NavisAI Issue Templates
+
+Use the templates in `.beads/templates/` to standardize issue creation:
+- `feature.md`
+- `bug.md`
+- `docs.md`
+- `high-risk.md`
+
 ### 6.2 Commit Message Format
 
 Include Beads IDs when relevant:
