@@ -156,7 +156,10 @@ async function main() {
         await logEvent('info', 'Bridge install log snippet', { snippet: installLog.snippet })
       }
 
-      if (bridgeExists && launchd.loaded && launchd.state === 'running') {
+      const launchdRunning = launchd.state === 'running' || Boolean(launchd.pid)
+      const launchdSuccessMarker = installLog.snippet?.includes('SUCCESS: Bridge service installed and started via launchd')
+
+      if (bridgeExists && launchd.loaded && (launchdRunning || launchdSuccessMarker)) {
         await showAlert(
           'Enabled',
           'Navis Bridge is enabled. Start Navis with `navisai up` to begin onboarding at https://navis.local/welcome.'
