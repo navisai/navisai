@@ -273,6 +273,10 @@ The verification pipeline detects:
 - Missing dependency links
 - Invalid label usage
 
+Note on `bd detect-pollution`:
+- It may flag legitimate testing issues whose titles start with "Test" (e.g., "Test packet forwarding + mDNS integration").
+- Treat these as valid issues unless they are clearly auto-generated or out of scope.
+
 ---
 
 ## 8. Implementation Status
