@@ -228,7 +228,7 @@ NAVIS_ANCHORS
   if [ -f "${systemPfConf}" ]; then
     if ! awk -v anchors="$anchorsFile" '
       BEGIN { inserted = 0 }
-      /anchor "com.apple\\\/\\*"/ && !inserted {
+      /^anchor "com.apple\\\/\\*"/ && !inserted {
         while ((getline line < anchors) > 0) print line
         close(anchors)
         inserted = 1
