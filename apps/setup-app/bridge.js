@@ -147,12 +147,10 @@ export async function installMacOSBridge() {
   const systemPfConf = '/etc/pf.conf'
   const systemPfConfBackup = '/etc/pf.conf.backup'
   const pfAnchorBlock = [
-    '',
     '# NavisAI anchors (do not modify Apple anchors)',
     'nat-anchor "navisai/*"',
     'rdr-anchor "navisai/*"',
-    'anchor "navisai/*"',
-    ''
+    'anchor "navisai/*"'
   ].join('\n')
 
   // Enhanced setup with graceful failure handling
@@ -219,16 +217,40 @@ NAVIS_RUNNER
 	fi
 
 \techo "Step: apply pf anchors"
-# Add navisai anchors without overwriting existing pf.conf, validate with dry-run
+# Insert navisai anchors before filtering anchors to preserve pf rule order.
 if ! grep -q "navisai/\\"" "${systemPfConf}" 2>/dev/null; then
   tmpPf="$(mktemp /var/tmp/navis-pf.XXXXXX)"
-  if [ -f "${systemPfConf}" ]; then cat "${systemPfConf}" > "$tmpPf"; fi
-  printf '%s\\n' '${pfAnchorBlock.replace(/'/g, "'\\''")}' >> "$tmpPf"
+  anchorsFile="$(mktemp /var/tmp/navis-anchors.XXXXXX)"
+  cat > "$anchorsFile" <<'NAVIS_ANCHORS'
+${pfAnchorBlock}
+NAVIS_ANCHORS
+
+  if [ -f "${systemPfConf}" ]; then
+    if ! awk -v anchors="$anchorsFile" '
+      BEGIN { inserted = 0 }
+      /anchor "com.apple\\\/\\*"/ && !inserted {
+        while ((getline line < anchors) > 0) print line
+        close(anchors)
+        inserted = 1
+      }
+      { print }
+      END { if (!inserted) exit 2 }
+    ' "${systemPfConf}" > "$tmpPf"; then
+      echo "ERROR: failed to insert navis anchors before filtering rules"
+      rm -f "$anchorsFile" "$tmpPf"
+      exit 1
+    fi
+  else
+    cat "$anchorsFile" > "$tmpPf"
+  fi
+
+  rm -f "$anchorsFile"
   if ! pfctl -nf "$tmpPf"; then
     echo "ERROR: pfctl dry-run failed"
+    rm -f "$tmpPf"
     exit 1
   fi
-  if [ -f "${systemPfConf}" ]; then printf '%s\\n' '${pfAnchorBlock.replace(/'/g, "'\\''")}' >> "${systemPfConf}"; else install -m 0644 "$tmpPf" "${systemPfConf}"; fi
+  install -m 0644 "$tmpPf" "${systemPfConf}"
   rm -f "$tmpPf"
 fi
 
