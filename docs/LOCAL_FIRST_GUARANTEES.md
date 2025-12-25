@@ -162,6 +162,7 @@ LAN access model (canonical):
 - mDNS/Bonjour provides LAN name resolution and discovery for `navis.local` (see `NETWORKING.md`).
 - `navisai setup` currently launches the helper in `apps/setup-app` (`@navisai/setup-app`) so the privileged bridge/mDNS installation is gated behind a single user approval dialog before daily use.
 - Setup must refuse mutative actions unless a Navis-recorded snapshot is present and within the configured freshness window (No Snapshot = No NavisAI).
+- Bridge start must be explicitly approved (setup-only); mutations are blocked without approval.
 
 Explicit guarantee:
 > NavisAI does not transmit data off-machine unless the user explicitly enables it.

@@ -100,7 +100,7 @@ Goal: one standard macOS admin sheet, seamless integration with existing apps.
    - Explain the automatic routing setup
    - Show how Navis will integrate with existing app
 6. Setup app requests admin approval and installs the intelligent bridge.
-7. Packet forwarding rules are installed (no service interruption), only after snapshot gating passes.
+7. Packet forwarding rules are installed (no service interruption), only after snapshot gating passes and setup approval is explicit.
 8. Setup app shows success and opens:
    - `https://navis.local/welcome`
    - Note that other apps continue working normally

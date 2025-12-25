@@ -51,10 +51,12 @@ Navis must refuse mutative actions unless the local platform passes:
 - `/var/run/mDNSResponder` socket exists
 - A Navis-recorded local snapshot exists and is within the configured freshness window
 - mDNS policy overrides are not disabling multicast advertisements
+- OCLP/root-patched environments are detected and gated
 
 Snapshot policy:
 - Before any mutative action, delete the prior Navis-recorded snapshot only (never touch other snapshots), then create a new snapshot and record its ID.
 - Snapshot freshness is configurable; only a Navis-recorded snapshot within the freshness window satisfies the gate.
+- Bridge start must be explicitly approved (setup-only). Mutations are blocked without approval.
 
 If any check fails, Navis must block setup/bridge mutations and provide guided repair steps. No automatic fixes.
 

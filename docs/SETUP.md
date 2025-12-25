@@ -73,10 +73,12 @@ Before any mutative action, setup must verify:
 - `ls /var/run/mDNSResponder` (socket must exist)
 - `tmutil listlocalsnapshots /` (must include a Navis-recorded snapshot)
 - `defaults read /Library/Preferences/com.apple.mDNSResponder.plist` (block if `NoMulticastAdvertisements = true`)
+- Detect OCLP/root-patched environments and apply stricter safeguards
 
 Snapshot policy:
 - Before any mutative action, delete the prior Navis-recorded snapshot only (never touch other snapshots), then create a new snapshot and record its ID.
 - Snapshot freshness is configurable; only a Navis-recorded snapshot within the freshness window satisfies the gate.
+- Bridge start must be explicitly approved (setup-only). Mutations are blocked without approval.
 
 If any check fails, setup must refuse to proceed and provide guided repair steps. No automatic fixes.
 
