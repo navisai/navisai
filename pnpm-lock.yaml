@@ -142,6 +142,9 @@ importers:
       '@navisai/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@navisai/logging':
+        specifier: workspace:*
+        version: link:../../packages/logging
 
   packages/api-contracts: {}
 
