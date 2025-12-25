@@ -534,8 +534,14 @@ export async function setupCommand(options = {}) {
       const bridgeExists = await fs.access(bridgePlist).then(() => true).catch(() => false)
       const launchd = await checkLaunchdService('com.navisai.bridge')
 
-      if (bridgeExists && launchd.loaded && launchd.state === 'running') {
+      const launchdRunning = launchd.state === 'running' || Boolean(launchd.pid)
+      const launchdStateUnknown = launchd.loaded && !launchd.state && !launchd.pid && !launchd.lastExitCode
+
+      if (bridgeExists && launchd.loaded && (launchdRunning || launchdStateUnknown)) {
         console.log('\n✅ Navis macOS Setup completed (bridge installed + running).')
+        if (launchdStateUnknown) {
+          console.log('   launchd state unavailable; assuming active based on installed service.')
+        }
         console.log(`🌐 Access at: ${CANONICAL_ORIGIN}`)
         console.log(`📱 Onboarding: ${CANONICAL_ORIGIN}${NAVIS_PATHS.welcome}`)
         return
