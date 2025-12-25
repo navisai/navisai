@@ -5,6 +5,7 @@ import fs from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { installBridge, uninstallBridge } from './bridge.js'
 import { detectOclp } from '@navisai/core/preflight'
+import { getLogPath, logEvent } from './logging.js'
 
 const execAsync = promisify(execCb)
 const execFileAsync = promisify(execFileCb)
@@ -20,16 +21,20 @@ async function runOsascript(script) {
 
 async function displayDialog(message, buttons = ['Cancel', 'Install'], defaultButton = 'Install') {
   const defaultIndex = Math.max(1, buttons.indexOf(defaultButton) + 1)
+  await logEvent('info', 'Displaying dialog', { message, buttons, defaultButton })
   const script = `
 tell application "System Events" to activate
 set dialogText to "${escapeAppleScriptString(message)}"
 set userChoice to button returned of (display dialog dialogText buttons {"${buttons.join('", "')}"} default button ${defaultIndex})
 return userChoice
 `
-  return runOsascript(script)
+  const choice = await runOsascript(script)
+  await logEvent('info', 'Dialog choice', { choice })
+  return choice
 }
 
 async function showAlert(title, message) {
+  await logEvent('info', 'Showing alert', { title, message })
   const script = `
 tell application "System Events" to activate
 display dialog "${escapeAppleScriptString(message)}" buttons {"OK"} default button "OK"
@@ -38,14 +43,17 @@ display dialog "${escapeAppleScriptString(message)}" buttons {"OK"} default butt
 }
 
 async function openOnboarding() {
+  await logEvent('info', 'Opening onboarding', { url: 'https://navis.local/welcome' })
   await execAsync('open https://navis.local/welcome')
 }
 
 async function isBridgeInstalled() {
   try {
     await execAsync('launchctl print system/com.navisai.bridge >/dev/null 2>&1')
+    await logEvent('info', 'Bridge status checked', { installed: true })
     return true
   } catch {
+    await logEvent('info', 'Bridge status checked', { installed: false })
     return false
   }
 }
@@ -67,16 +75,25 @@ async function checkLaunchdService(label) {
 async function isNavisReachable() {
   try {
     const response = await fetch('https://navis.local/status')
+    await logEvent('info', 'Navis reachability checked', { ok: response.ok })
     return response.ok
   } catch {
+    await logEvent('warn', 'Navis reachability check failed')
     return false
   }
 }
 
 async function main() {
+  await logEvent('info', 'Setup app started', { pid: process.pid })
   const bridgeInstalled = await isBridgeInstalled()
   const reachable = await isNavisReachable()
   const oclpStatus = await detectOclp()
+  await logEvent('info', 'Detected environment', {
+    bridgeInstalled,
+    reachable,
+    oclpDetected: oclpStatus.detected,
+    oclpWarning: oclpStatus.warning
+  })
 
   const statusLines = [
     `Bridge: ${bridgeInstalled ? 'Enabled' : 'Not enabled'}`,
@@ -100,6 +117,7 @@ async function main() {
 
   try {
     if (choice === 'Enable') {
+      await logEvent('info', 'Enable selected')
       if (oclpStatus.detected) {
         const warning = [
           'OCLP detected on this Mac.',
@@ -108,14 +126,17 @@ async function main() {
         ].join('\n')
         const confirm = await displayDialog(warning, ['Cancel', 'Continue'], 'Continue')
         if (confirm !== 'Continue') {
+          await logEvent('info', 'OCLP confirmation canceled')
           await showAlert('Setup canceled', 'No changes were made.')
           return
         }
       }
+      await logEvent('info', 'Installing bridge')
       await installBridge('darwin')
       const bridgePlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
       const bridgeExists = await fs.access(bridgePlist).then(() => true).catch(() => false)
       const launchd = await checkLaunchdService('com.navisai.bridge')
+      await logEvent('info', 'Bridge install status', { bridgeExists, launchd })
 
       if (bridgeExists && launchd.loaded && launchd.state === 'running') {
         await showAlert(
@@ -132,12 +153,13 @@ async function main() {
 
       await showAlert(
         'Setup incomplete',
-        `Navis Bridge install finished but the service is not running.\n\n${statusLines.join('\n')}\n\nTry:\n- navisai setup --skip-ui\n- sudo launchctl kickstart -k system/com.navisai.bridge\n- navisai doctor\n\nRefs: navisai-45k`
+        `Navis Bridge install finished but the service is not running.\n\n${statusLines.join('\n')}\n\nTry:\n- navisai setup --skip-ui\n- sudo launchctl kickstart -k system/com.navisai.bridge\n- navisai doctor\n\nLog: ${getLogPath()}\n\nRefs: navisai-45k`
       )
       return
     }
 
     if (choice === 'Disable') {
+      await logEvent('info', 'Disable selected')
       await uninstallBridge('darwin')
       await showAlert(
         'Disabled',
@@ -147,18 +169,22 @@ async function main() {
     }
 
     if (choice === 'Open onboarding') {
+      await logEvent('info', 'Open onboarding selected')
       await openOnboarding()
       return
     }
 
+    await logEvent('info', 'Setup canceled')
     await showAlert('Setup canceled', 'No changes were made.')
   } catch (error) {
+    await logEvent('error', 'Setup failed', { error: error.message })
     await showAlert('Setup failed', error.message || 'See navisai doctor for details.')
     process.exit(1)
   }
 }
 
-main().catch(error => {
+main().catch(async (error) => {
+  await logEvent('error', 'Setup app crashed', { error: error.message })
   console.error('Navis Setup app failed:', error)
   process.exit(1)
 })

@@ -8,6 +8,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { runPreflightChecks } from '@navisai/core/preflight'
 import { readSnapshotState, recordLatestSnapshot, isSnapshotFresh, navisSnapshotExists } from '@navisai/core/snapshot'
+import { logEvent } from './logging.js'
 
 const execAsync = promisify(execCb)
 const require = createRequire(import.meta.url)
@@ -47,8 +48,16 @@ export async function runMacOSAdminShell(shellCommand) {
 
   try {
     const script = `do shell script "chmod +x '${tempScript}' && '${tempScript}'" with administrator privileges`
+    await logEvent('info', 'Running macOS admin shell')
     const result = await execAsync(`osascript -e "${escapeAppleScriptShell(script)}"`)
+    await logEvent('info', 'macOS admin shell completed', {
+      stdout: (result.stdout || '').slice(0, 2000),
+      stderr: (result.stderr || '').slice(0, 2000)
+    })
     return result.stdout || result
+  } catch (error) {
+    await logEvent('error', 'macOS admin shell failed', { error: error.message })
+    throw error
   } finally {
     // Clean up temp script
     try {
@@ -64,15 +73,21 @@ function escapeAppleScriptShell(command) {
 }
 
 export async function installMacOSBridge() {
+  await logEvent('info', 'Install macOS bridge requested')
   const preflight = await runPreflightChecks()
   if (!preflight.ok) {
     const details = preflight.checks
       .map((check) => `- ${check.name}: ${check.ok ? 'ok' : `fail (${check.error || 'unknown'})`}`)
       .join('\n')
+    await logEvent('error', 'Preflight checks failed', { details })
     throw new Error(`Preflight checks failed:\n${details}`)
   }
 
   const previousSnapshot = await readSnapshotState()
+  await logEvent('info', 'Snapshot state read', {
+    snapshotId: previousSnapshot?.id ?? null,
+    snapshotTime: previousSnapshot?.timestamp ?? null
+  })
   const bridgeEntrypoint = resolveDaemonBridgeEntrypoint()
   const nodePath = process.execPath
 
@@ -125,6 +140,7 @@ export async function installMacOSBridge() {
 </plist>`
 
   await writeFile(localPlist, plist, 'utf8')
+  await logEvent('info', 'Bridge plist staged', { localPlist, systemPlist })
 
   const systemPfConf = '/etc/pf.conf'
   const systemPfConfBackup = '/etc/pf.conf.backup'
@@ -141,6 +157,11 @@ export async function installMacOSBridge() {
   const snapshotExists = await navisSnapshotExists(previousSnapshot)
   const snapshotFresh = isSnapshotFresh(previousSnapshot)
   const shouldRotate = !snapshotExists || !snapshotFresh
+  await logEvent('info', 'Snapshot gate evaluated', {
+    snapshotExists,
+    snapshotFresh,
+    shouldRotate
+  })
   const snapshotBlock = shouldRotate
     ? previousSnapshot?.id
       ? `\ttmutil deletelocalsnapshots "${previousSnapshot.id}" || true\n\ttmutil snapshot`
@@ -216,8 +237,13 @@ fi
   try {
     // Make script executable and run it with admin privileges
     const script = `do shell script "chmod +x '${tempScript}' && '${tempScript}'" with administrator privileges`
+    await logEvent('info', 'Running macOS bridge install script')
     const result = await execAsync(`osascript -e "${escapeAppleScriptShell(script)}"`)
     await recordLatestSnapshot()
+    await logEvent('info', 'Bridge install completed', {
+      stdout: (result.stdout || '').slice(0, 2000),
+      stderr: (result.stderr || '').slice(0, 2000)
+    })
     return result.stdout || result
   } finally {
     // Clean up temp script
@@ -237,11 +263,13 @@ fi
 }
 
 export async function uninstallMacOSBridge() {
+  await logEvent('info', 'Uninstall macOS bridge requested')
   const preflight = await runPreflightChecks()
   if (!preflight.ok) {
     const details = preflight.checks
       .map((check) => `- ${check.name}: ${check.ok ? 'ok' : `fail (${check.error || 'unknown'})`}`)
       .join('\n')
+    await logEvent('error', 'Preflight checks failed', { details })
     throw new Error(`Preflight checks failed:\n${details}`)
   }
 
@@ -252,6 +280,11 @@ export async function uninstallMacOSBridge() {
   const snapshotExists = await navisSnapshotExists(previousSnapshot)
   const snapshotFresh = isSnapshotFresh(previousSnapshot)
   const shouldRotate = !snapshotExists || !snapshotFresh
+  await logEvent('info', 'Snapshot gate evaluated', {
+    snapshotExists,
+    snapshotFresh,
+    shouldRotate
+  })
   const snapshotBlock = shouldRotate
     ? previousSnapshot?.id
       ? `tmutil deletelocalsnapshots "${previousSnapshot.id}" || true; tmutil snapshot`
@@ -268,6 +301,7 @@ export async function uninstallMacOSBridge() {
 
   await runMacOSAdminShell(shellCommand)
   await recordLatestSnapshot()
+  await logEvent('info', 'Bridge uninstall completed')
 }
 
 export async function runLinuxAdminShell(shellCommand) {
