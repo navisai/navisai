@@ -10,6 +10,7 @@
     "navisai-setup-app": "index.js"
   },
   "dependencies": {
-    "@navisai/core": "workspace:*"
+    "@navisai/core": "workspace:*",
+    "@navisai/logging": "workspace:*"
   }
 }
