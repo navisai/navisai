@@ -47,6 +47,20 @@ async function openOnboarding() {
   await execAsync('open https://navis.local/welcome')
 }
 
+async function readInstallLogSnippet() {
+  const installLogPath = '/var/tmp/navis-bridge-install.log'
+  try {
+    const content = await fs.readFile(installLogPath, 'utf8')
+    const lines = content.trim().split('\n')
+    return {
+      path: installLogPath,
+      snippet: lines.slice(-40).join('\n')
+    }
+  } catch {
+    return { path: installLogPath, snippet: null }
+  }
+}
+
 async function isBridgeInstalled() {
   try {
     await execAsync('launchctl print system/com.navisai.bridge >/dev/null 2>&1')
@@ -136,7 +150,11 @@ async function main() {
       const bridgePlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
       const bridgeExists = await fs.access(bridgePlist).then(() => true).catch(() => false)
       const launchd = await checkLaunchdService('com.navisai.bridge')
+      const installLog = await readInstallLogSnippet()
       await logEvent('info', 'Bridge install status', { bridgeExists, launchd })
+      if (installLog.snippet) {
+        await logEvent('info', 'Bridge install log snippet', { snippet: installLog.snippet })
+      }
 
       if (bridgeExists && launchd.loaded && launchd.state === 'running') {
         await showAlert(
@@ -151,9 +169,12 @@ async function main() {
         launchd.loaded ? `launchd state: ${launchd.state ?? 'unknown'}` : 'launchd: not loaded',
       ]
 
+      const logLines = installLog.snippet
+        ? `\n\nLast install log lines:\n${installLog.snippet}`
+        : ''
       await showAlert(
         'Setup incomplete',
-        `Navis Bridge install finished but the service is not running.\n\n${statusLines.join('\n')}\n\nTry:\n- navisai setup --skip-ui\n- sudo launchctl kickstart -k system/com.navisai.bridge\n- navisai doctor\n\nLog: ${getLogPath()}\n\nRefs: navisai-45k`
+        `Navis Bridge install finished but the service is not running.\n\n${statusLines.join('\n')}\n\nTry:\n- navisai setup --skip-ui\n- sudo launchctl kickstart -k system/com.navisai.bridge\n- navisai doctor\n\nLog: ${getLogPath()}\nInstall log: ${installLog.path}${logLines}\n\nRefs: navisai-45k`
       )
       return
     }

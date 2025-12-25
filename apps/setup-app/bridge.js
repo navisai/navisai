@@ -88,6 +88,8 @@ export async function installMacOSBridge() {
     snapshotId: previousSnapshot?.id ?? null,
     snapshotTime: previousSnapshot?.timestamp ?? null
   })
+  const installLogPath = '/var/tmp/navis-bridge-install.log'
+  await logEvent('info', 'Bridge install log path', { installLogPath })
   const bridgeEntrypoint = resolveDaemonBridgeEntrypoint()
   const nodePath = process.execPath
 
@@ -169,9 +171,14 @@ export async function installMacOSBridge() {
     : ''
   const shellScript = `#!/bin/bash
 \tset -euo pipefail
+\tLOG_PATH="${installLogPath}"
+\techo "=== Navis bridge install $(date -u +\"%Y-%m-%dT%H:%M:%SZ\") ===" >> "$LOG_PATH"
+\texec > >(tee -a "$LOG_PATH") 2>&1
+\techo "Step: begin"
 \t# Navis snapshot gate (mutations must be preceded by a fresh snapshot)
 ${snapshotBlock}
 
+\techo "Step: install runner"
 	# Install a root-owned runner; launchd can refuse to bootstrap LaunchDaemons that directly
 	# execute user-owned Homebrew binaries (common cause of I/O error on bootstrap).
 	install -d -m 0755 "/usr/local/libexec"
@@ -183,30 +190,38 @@ ${snapshotBlock}
 	chmod 0755 "${runnerPath}"
 	chown root:wheel "${runnerPath}"
 
+\techo "Step: install plist"
 	# Install plist
 	rm -f "${systemPlist}"
 	install -m 0644 "${localPlist}" "${systemPlist}"
 	chown root:wheel "${systemPlist}"
 
+\techo "Step: ensure log files"
 	# Ensure log files exist and are writable by launchd (root)
 	touch /var/log/navis-bridge.log /var/log/navis-bridge.err
 	chown root:wheel /var/log/navis-bridge.log /var/log/navis-bridge.err
 
+\techo "Step: backup pf.conf"
 	# Backup existing pf.conf if it exists and hasn't been backed up
 	if [ -f "${systemPfConf}" ] && [ ! -f "${systemPfConfBackup}" ]; then
 	  cp "${systemPfConf}" "${systemPfConfBackup}"
 	fi
 
+\techo "Step: apply pf anchors"
 # Add navisai anchors without overwriting existing pf.conf, validate with dry-run
 if ! grep -q "navisai/\\"" "${systemPfConf}" 2>/dev/null; then
   tmpPf="$(mktemp /var/tmp/navis-pf.XXXXXX)"
   if [ -f "${systemPfConf}" ]; then cat "${systemPfConf}" > "$tmpPf"; fi
   printf '%s\\n' '${pfAnchorBlock.replace(/'/g, "'\\''")}' >> "$tmpPf"
-  pfctl -nf "$tmpPf"
+  if ! pfctl -nf "$tmpPf"; then
+    echo "ERROR: pfctl dry-run failed"
+    exit 1
+  fi
   if [ -f "${systemPfConf}" ]; then printf '%s\\n' '${pfAnchorBlock.replace(/'/g, "'\\''")}' >> "${systemPfConf}"; else install -m 0644 "$tmpPf" "${systemPfConf}"; fi
   rm -f "$tmpPf"
 fi
 
+\techo "Step: launchctl bootstrap"
 	# Try to load the service with fallback handling
 	LAUNCHCTL_SUCCESS=true
 	/bin/launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true
@@ -229,6 +244,10 @@ fi
 	else
 	  echo "FALLBACK: Bridge files installed, start manually with: sudo node '${bridgeEntrypoint}' start --setup-approved"
 	fi
+
+\techo "Step: verify install artifacts"
+\tls -l "${systemPlist}" || true
+\tls -l "${runnerPath}" || true
 `
 
   const tempScript = path.join(homedir(), '.navis', 'install-bridge.sh')
