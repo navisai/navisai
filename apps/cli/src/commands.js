@@ -77,6 +77,27 @@ async function queryMdnsARecord(hostname, timeoutMs = 3000) {
   }
 }
 
+async function queryMdnsAAAARecord(hostname, timeoutMs = 3000) {
+  if (!(await hasCommand('dns-sd'))) {
+    return { success: false, error: 'dns-sd not available' }
+  }
+
+  try {
+    const { stdout } = await execAsync(
+      `perl -e 'alarm 3; exec "dns-sd", "-Q", "${hostname}", "AAAA"' 2>/dev/null || true`,
+      { encoding: 'utf8', timeout: timeoutMs }
+    )
+    const line = stdout
+      .split('\n')
+      .find((row) => row.includes(`${hostname}.`) && row.includes('Addr') && row.includes(':'))
+    const ip = line?.trim().match(/([0-9a-fA-F:]+)/)?.[1]
+    if (!ip) return { success: false, error: `No mDNS AAAA answer observed for ${hostname}` }
+    return { success: true, address: ip }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
 async function queryMdnsRecord(name, recordType, timeoutMs = 3000) {
   if (!(await hasCommand('dns-sd'))) {
     return { success: false, error: 'dns-sd not available' }
@@ -1023,6 +1044,13 @@ export async function doctorCommand() {
   } else {
     console.log(`⚠️  mDNS query: ${mdnsQuery.error}`)
     console.log('   💡 If IP access works but navis.local does not on a phone, your LAN may block Bonjour/mDNS between clients.')
+  }
+
+  const mdnsQueryV6 = await queryMdnsAAAARecord('navis.local', 3000)
+  if (mdnsQueryV6.success) {
+    console.log(`✅ mDNS query: navis.local AAAA -> ${mdnsQueryV6.address}`)
+  } else {
+    console.log(`⚠️  mDNS AAAA query: ${mdnsQueryV6.error}`)
   }
 
   const navisService = await browseMdnsService('_navisai._tcp', 'local', 3000)

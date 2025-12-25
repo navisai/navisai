@@ -44,6 +44,7 @@ class PacketForwardingBridge {
     this.lanInterface = null
     this.lanIp = null
     this.lanNetmask = null
+    this.lanIpv6 = null
     this.navisAliasIp = null
     this.navisAliasInterface = null
     this.ipMonitorInterval = null
@@ -60,6 +61,18 @@ class PacketForwardingBridge {
       for (const addr of addrs || []) {
         if (!addr || addr.family !== 'IPv4' || addr.internal) continue
         return { name, ip: addr.address, netmask: addr.netmask }
+      }
+    }
+    return null
+  }
+
+  getLanInterfaceIPv6() {
+    const interfaces = networkInterfaces()
+    for (const addrs of Object.values(interfaces)) {
+      for (const addr of addrs || []) {
+        if (!addr || addr.internal || addr.family !== 'IPv6') continue
+        if (addr.address.startsWith('fe80') || addr.address === '::1') continue
+        return addr.address
       }
     }
     return null
@@ -263,16 +276,18 @@ class PacketForwardingBridge {
   async startMDNS() {
     try {
       const ip = this.navisAliasIp || this.getLanAddress()
+      const ipv6 = this.getLanInterfaceIPv6()
       if (!ip) {
         console.log('⚠️  mDNS not started: no LAN IPv4 address detected')
         return
       }
 
+      this.lanIpv6 = ipv6
       console.log('🔍 Starting mDNS service for navis.local...', { ip })
 
       this.mdns = multicastDns()
 
-      const buildMdnsRecords = (address) => ([
+      const buildMdnsRecords = (address, ipv6Address) => ([
         {
           name: mdnsServiceType,
           type: 'PTR',
@@ -292,6 +307,7 @@ class PacketForwardingBridge {
           ttl: 120,
         },
         { name: targetDomain, type: 'A', ttl: 120, data: address },
+        ...(ipv6Address ? [{ name: targetDomain, type: 'AAAA', ttl: 120, data: ipv6Address }] : []),
       ])
 
       // Respond to queries for navis.local
@@ -301,21 +317,21 @@ class PacketForwardingBridge {
         if (!advertised) return
 
         const wantsNavis =
-          questions.some((q) => q.name === targetDomain && (q.type === 'A' || q.type === 'ANY')) ||
+          questions.some((q) => q.name === targetDomain && (q.type === 'A' || q.type === 'AAAA' || q.type === 'ANY')) ||
           questions.some((q) => q.name === mdnsServiceType && (q.type === 'PTR' || q.type === 'ANY')) ||
           questions.some((q) => q.name === mdnsServiceInstance && (q.type === 'SRV' || q.type === 'TXT' || q.type === 'ANY'))
 
         if (wantsNavis) {
-          this.mdns.respond({ answers: buildMdnsRecords(advertised) })
+          this.mdns.respond({ answers: buildMdnsRecords(advertised, this.lanIpv6) })
         }
       })
 
       // Initial advertisement
-      this.mdns.respond({ answers: buildMdnsRecords(ip) })
+      this.mdns.respond({ answers: buildMdnsRecords(ip, this.lanIpv6) })
 
       console.log('✅ mDNS service active for navis.local')
 
-      // Monitor IP changes and update mDNS
+      // Monitor IP changes and re-announce mDNS records
       this.ipMonitorInterval = setInterval(async () => {
         const newLan = this.getLanInterfaceIPv4()
         if (!newLan || !newLan.ip) return
@@ -326,6 +342,7 @@ class PacketForwardingBridge {
           this.lanInterface = newLan.name
           this.lanIp = newLan.ip
           this.lanNetmask = newLan.netmask
+          this.lanIpv6 = this.getLanInterfaceIPv6()
 
           if (this.platform === 'darwin') {
             await this.releaseNavisAliasIp()
@@ -349,7 +366,7 @@ class PacketForwardingBridge {
         // Re-advertise current target (alias if present, else LAN IP).
         const advertised = this.navisAliasIp || this.lanIp
         if (advertised) {
-          this.mdns.respond({ answers: buildMdnsRecords(advertised) })
+          this.mdns.respond({ answers: buildMdnsRecords(advertised, this.lanIpv6) })
         }
       }, 30000) // Check every 30 seconds
 
