@@ -260,6 +260,17 @@ async function runPreflightGate(context) {
   const result = await runPreflightChecks()
   if (result.ok) {
     console.log('✅ Preflight checks passed')
+    const oclpDetected = result.checks.some((check) => check.name === 'OCLP detected' && check.detected)
+    if (oclpDetected) {
+      console.log('⚠️  OCLP detected: stricter safeguards are required.')
+      if (context.startsWith('setup') || context.startsWith('reset')) {
+        const ok = await confirmTyped(
+          'OCLP detected. Proceeding will create a Navis snapshot before mutations.',
+          'I UNDERSTAND'
+        )
+        if (!ok) return false
+      }
+    }
     return true
   }
   console.log('❌ Preflight checks failed:')
@@ -269,6 +280,10 @@ async function runPreflightGate(context) {
   })
   console.log('   Fix the issues above before retrying setup.')
   console.log('   If mDNSResponder is down, reboot or clear policy overrides first.')
+  const oclpDetected = result.checks.some((check) => check.name === 'OCLP detected' && check.detected)
+  if (oclpDetected) {
+    console.log('   OCLP detected: stricter safeguards apply, but snapshot creation is still allowed.')
+  }
   return false
 }
 
@@ -872,14 +887,18 @@ export async function doctorCommand() {
   const preflight = await runPreflightChecks()
   if (preflight.ok) {
     console.log('✅ Preflight: mDNS/DNS checks passed')
+    if (preflight.checks.some((check) => check.name === 'OCLP detected' && check.detected)) {
+      console.log('⚠️  OCLP detected: stricter safeguards apply')
+    }
   } else {
     console.log('❌ Preflight: checks failed')
     preflight.checks.forEach((check) => {
       const status = check.ok ? 'ok' : 'fail'
-      console.log(`   - ${check.name}: ${status}${check.error ? ` (${check.error})` : ''}`)
+      const detail = check.error || check.warning
+      console.log(`   - ${check.name}: ${status}${detail ? ` (${detail})` : ''}`)
     })
     console.log('   Resolve system DNS/mDNS health issues before running setup.')
-    if (preflight.checks.some((check) => check.name === 'OCLP detected' && !check.ok)) {
+    if (preflight.checks.some((check) => check.name === 'OCLP detected' && check.detected)) {
       console.log('   OCLP detected: enable extra safeguards and verify snapshot gating before proceeding.')
     }
     allGood = false

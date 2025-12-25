@@ -4,6 +4,7 @@ import { exec as execCb, execFile as execFileCb } from 'node:child_process'
 import fs from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { installBridge, uninstallBridge } from './bridge.js'
+import { detectOclp } from '@navisai/core/preflight'
 
 const execAsync = promisify(execCb)
 const execFileAsync = promisify(execFileCb)
@@ -75,6 +76,7 @@ async function isNavisReachable() {
 async function main() {
   const bridgeInstalled = await isBridgeInstalled()
   const reachable = await isNavisReachable()
+  const oclpStatus = await detectOclp()
 
   const statusLines = [
     `Bridge: ${bridgeInstalled ? 'Enabled' : 'Not enabled'}`,
@@ -98,6 +100,18 @@ async function main() {
 
   try {
     if (choice === 'Enable') {
+      if (oclpStatus.detected) {
+        const warning = [
+          'OCLP detected on this Mac.',
+          'Navis will apply stricter safeguards and create a snapshot before mutations.',
+          'Proceed only if you understand the risks.',
+        ].join('\n')
+        const confirm = await displayDialog(warning, ['Cancel', 'Continue'], 'Continue')
+        if (confirm !== 'Continue') {
+          await showAlert('Setup canceled', 'No changes were made.')
+          return
+        }
+      }
       await installBridge('darwin')
       const bridgePlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
       const bridgeExists = await fs.access(bridgePlist).then(() => true).catch(() => false)

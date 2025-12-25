@@ -140,7 +140,7 @@ export async function detectOclp() {
   for (const candidate of paths) {
     try {
       await access(candidate)
-      return { ok: false, detected: true, error: `OCLP detected: ${candidate}` }
+      return { ok: true, detected: true, warning: `OCLP detected: ${candidate}` }
     } catch {
       // ignore
     }
