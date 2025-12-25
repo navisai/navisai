@@ -56,7 +56,7 @@ async function resolveNavisLocal() {
   }
 }
 
-async function queryMdnsARecord(hostname) {
+async function queryMdnsARecord(hostname, timeoutMs = 3000) {
   if (!(await hasCommand('dns-sd'))) {
     return { success: false, error: 'dns-sd not available' }
   }
@@ -64,7 +64,7 @@ async function queryMdnsARecord(hostname) {
   try {
     const { stdout } = await execAsync(
       `perl -e 'alarm 3; exec "dns-sd", "-Q", "${hostname}", "A"' 2>/dev/null || true`,
-      { encoding: 'utf8' }
+      { encoding: 'utf8', timeout: timeoutMs }
     )
     const line = stdout
       .split('\n')
@@ -77,7 +77,7 @@ async function queryMdnsARecord(hostname) {
   }
 }
 
-async function queryMdnsRecord(name, recordType) {
+async function queryMdnsRecord(name, recordType, timeoutMs = 3000) {
   if (!(await hasCommand('dns-sd'))) {
     return { success: false, error: 'dns-sd not available' }
   }
@@ -85,7 +85,7 @@ async function queryMdnsRecord(name, recordType) {
   try {
     const { stdout } = await execAsync(
       `perl -e 'alarm 3; exec "dns-sd", "-Q", "${name}", "${recordType}"' 2>/dev/null || true`,
-      { encoding: 'utf8' }
+      { encoding: 'utf8', timeout: timeoutMs }
     )
     const line = stdout
       .split('\n')
@@ -107,7 +107,7 @@ function extractMdnsToken(line, marker) {
   return slice.split(' ')[0]?.replace(/\.$/, '') || null
 }
 
-async function browseMdnsService(serviceType, domain = 'local') {
+async function browseMdnsService(serviceType, domain = 'local', timeoutMs = 3000) {
   if (!(await hasCommand('dns-sd'))) {
     return { success: false, error: 'dns-sd not available' }
   }
@@ -115,7 +115,7 @@ async function browseMdnsService(serviceType, domain = 'local') {
   try {
     const { stdout } = await execAsync(
       `perl -e 'alarm 3; exec "dns-sd", "-B", "${serviceType}", "${domain}"' 2>/dev/null || true`,
-      { encoding: 'utf8' }
+      { encoding: 'utf8', timeout: timeoutMs }
     )
     const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
     const found = lines.some((l) => l.includes(serviceType))
@@ -899,6 +899,12 @@ export async function doctorCommand() {
     }
   }
 
+  if (!allGood && !daemonProcess) {
+    console.log('\n⛔ Doctor stopped early due to failed safety gates.')
+    console.log('   Resolve the safety failures above, then re-run: navisai doctor')
+    return
+  }
+
   // Comprehensive bridge diagnostics
   console.log('\n🌉 Bridge Service Diagnostics:')
   const bridgePlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
@@ -1011,7 +1017,7 @@ export async function doctorCommand() {
   }
 
   // Directly query mDNS to catch "router blocks multicast between clients" issues (Refs: navisai-jsh)
-  const mdnsQuery = await queryMdnsARecord('navis.local')
+  const mdnsQuery = await queryMdnsARecord('navis.local', 3000)
   if (mdnsQuery.success) {
     console.log(`✅ mDNS query: navis.local A -> ${mdnsQuery.address}`)
   } else {
@@ -1019,7 +1025,7 @@ export async function doctorCommand() {
     console.log('   💡 If IP access works but navis.local does not on a phone, your LAN may block Bonjour/mDNS between clients.')
   }
 
-  const navisService = await browseMdnsService('_navisai._tcp')
+  const navisService = await browseMdnsService('_navisai._tcp', 'local', 3000)
   if (navisService.success && navisService.found) {
     console.log('✅ mDNS service: _navisai._tcp advertised')
   } else if (navisService.success) {
@@ -1030,13 +1036,13 @@ export async function doctorCommand() {
 
   const mdnsServiceType = '_navisai._tcp.local'
   const mdnsInstance = 'NavisAI._navisai._tcp.local'
-  const ptrResult = await queryMdnsRecord(mdnsServiceType, 'PTR')
+  const ptrResult = await queryMdnsRecord(mdnsServiceType, 'PTR', 3000)
   if (ptrResult.success) {
     const target = ptrResult.line.match(/\bPTR\s+(\S+)/)?.[1]?.replace(/\.$/, '')
     console.log(`✅ mDNS PTR: ${mdnsServiceType} -> ${target || 'unknown'}`)
     const instanceName = target || mdnsInstance
 
-    const srvResult = await queryMdnsRecord(instanceName, 'SRV')
+    const srvResult = await queryMdnsRecord(instanceName, 'SRV', 3000)
     if (srvResult.success) {
       const srvTarget = extractMdnsToken(srvResult.line, ' SRV ')
       const hasPort = srvResult.line.match(/\b443\b/)
@@ -1053,7 +1059,7 @@ export async function doctorCommand() {
       console.log(`⚠️  mDNS SRV: ${srvResult.error}`)
     }
 
-    const txtResult = await queryMdnsRecord(instanceName, 'TXT')
+    const txtResult = await queryMdnsRecord(instanceName, 'TXT', 3000)
     if (txtResult.success) {
       const txtLine = txtResult.line
       const hasTls = txtLine.includes('tls=1')
