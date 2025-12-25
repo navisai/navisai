@@ -481,6 +481,27 @@ These rules **override** any permissive defaults in Global AGENTS.md:
    - No premium / enterprise logic in this repository.
    - Premium features live out-of-repo only.
 
+6. **Snapshot gate (No Snapshot = No NavisAI)**
+   - Any mutative action (PF rules, cert install, mDNS changes, loopback interception) requires a Navis-created local snapshot recorded by Navis.
+   - Before mutating, delete the previous Navis-recorded snapshot only; never touch other snapshots.
+   - NavisAI must refuse to run privileged/setup mutations without a recorded snapshot ID and a configurable freshness window.
+   - If snapshot creation or deletion fails, block mutations and prompt a Doctor health check; allow retry after remediation.
+
+7. **DNS/mDNS preflight gate**
+   - NavisAI must block setup/bridge mutations if mDNSResponder/DNS resolution is broken.
+   - Preflight must explicitly test `mDNSResponder`, `dns-sd`, and `dscacheutil`.
+
+8. **mDNS policy inspection**
+   - NavisAI must detect policy-layer mDNS disablement (e.g., `NoMulticastAdvertisements = true`) and refuse to proceed until resolved.
+
+9. **SystemConfiguration safety**
+   - Never restore/merge `SystemConfiguration` folders or reapply broken network plists.
+   - Never copy old plists into `/Library/Preferences/SystemConfiguration`.
+
+10. **lldb policy**
+   - Allowed only in developer builds or Doctor mode.
+   - Forbidden for end-user flows.
+
 ---
 
 ## 5. Tooling & Environment Constraints
@@ -573,6 +594,12 @@ The following are always considered **high-risk** in this project:
 - Network exposure beyond localhost
 - Device pairing / trust establishment
 - Process lifecycle control
+
+Snapshot requirement for high-risk ops:
+- Before any mutative networking changes (PF rules, cert installs, mDNS enablement, loopback interception), require a local APFS snapshot and record the snapshot ID.
+
+Agent incident review protocol:
+- Review incident context, recent commits, Beads status, and confirm snapshot state before proposing changes.
 
 High-risk changes must:
 - be minimal in scope

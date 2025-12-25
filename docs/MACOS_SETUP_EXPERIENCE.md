@@ -87,6 +87,12 @@ Goal: one standard macOS admin sheet, seamless integration with existing apps.
    - **Scan for port 443 usage** and identify the service
    - Detect whether `navis.local` resolves via mDNS
    - Check TLS material at `~/.navis/certs/`
+   - Verify `mDNSResponder` is running and `dns-sd` can query services
+   - Verify `mDNSResponderHelper` is running and `/var/run/mDNSResponder` socket exists
+   - Verify terminal DNS resolution (`dscacheutil -q host -a name apple.com`)
+   - Verify Navis-recorded local APFS snapshot exists (`tmutil listlocalsnapshots /`)
+   - Check mDNS policy overrides (`NoMulticastAdvertisements`)
+   - Detect OCLP / root-patched state and display stricter safeguards
 3. User clicks **Enable**.
 4. If port 443 is free:
    - Standard bridge installation
@@ -94,7 +100,7 @@ Goal: one standard macOS admin sheet, seamless integration with existing apps.
    - Explain the automatic routing setup
    - Show how Navis will integrate with existing app
 6. Setup app requests admin approval and installs the intelligent bridge.
-7. Packet forwarding rules are installed (no service interruption).
+7. Packet forwarding rules are installed (no service interruption), only after snapshot gating passes.
 8. Setup app shows success and opens:
    - `https://navis.local/welcome`
    - Note that other apps continue working normally

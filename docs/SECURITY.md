@@ -36,7 +36,48 @@ Do NOT open GitHub issues for security concerns.
 - The daemon is not a privileged process.  
 - The daemon binds to loopback by default (`127.0.0.1`) and is reached over LAN via OS-level packet forwarding on 443.  
 - Public Internet exposure is strictly prohibited.  
-- All pairing attempts require explicit approval from the primary machine.
+- All pairing attempts require explicit approval from the primary machine.  
+
+---
+
+## 5. Platform Health Gates (Required)
+
+Navis must refuse mutative actions unless the local platform passes:
+
+- `mDNSResponder` is running
+- `mDNSResponderHelper` is running
+- `dns-sd` service queries succeed
+- `dscacheutil` resolves external hosts
+- `/var/run/mDNSResponder` socket exists
+- A Navis-recorded local snapshot exists and is within the configured freshness window
+- mDNS policy overrides are not disabling multicast advertisements
+
+Snapshot policy:
+- Before any mutative action, delete the prior Navis-recorded snapshot only (never touch other snapshots), then create a new snapshot and record its ID.
+- Snapshot freshness is configurable; only a Navis-recorded snapshot within the freshness window satisfies the gate.
+
+If any check fails, Navis must block setup/bridge mutations and provide guided repair steps. No automatic fixes.
+
+### Prohibited Repair Actions
+
+Navis must not attempt or recommend:
+
+- Restoring or merging `SystemConfiguration` folders
+- Copying legacy or broken plists into `/Library/Preferences/SystemConfiguration`
+- Repair-by-replacement of system networking folders
+
+### Debugging Tools Policy
+
+- `lldb` is allowed only in developer builds or Doctor mode.
+- `lldb` is forbidden for end-user flows.
+
+### User-Space State Notes
+
+User app state resets after network service regeneration are not rollback signals and do not imply corruption.
+
+### Agent Safety Protocol
+
+- Review incident context, recent commits, Beads status, and confirm snapshot state before proposing changes.
 
 ---
 
@@ -85,6 +126,7 @@ Refs: navisai-288, navisai-ms0
 - Use Navis on trusted networks only
 - Consider VPN for public WiFi usage
 - mDNS can be disabled for air-gapped environments
+- If mDNS is policy-disabled (`NoMulticastAdvertisements = true`), Navis must refuse to enable LAN routing and explain the risk.
 
 ## 7. PWA Security
 

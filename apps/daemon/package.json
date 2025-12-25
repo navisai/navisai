@@ -34,6 +34,7 @@
     "@fastify/websocket": "^11.2.0",
     "@libsql/client": "^0.10.0",
     "@navisai/api-contracts": "workspace:*",
+    "@navisai/core": "workspace:*",
     "@navisai/db": "workspace:*",
     "@navisai/discovery": "workspace:*",
     "@navisai/logging": "workspace:*",

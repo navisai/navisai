@@ -9,6 +9,8 @@ import { createRequire } from 'node:module'
 import readline from 'node:readline/promises'
 import { NAVIS_PATHS } from '@navisai/api-contracts'
 import { installBridge, uninstallBridge } from '@navisai/setup-app/bridge'
+import { runPreflightChecks } from '@navisai/core/preflight'
+import { refreshNavisSnapshot, readSnapshotState, navisSnapshotExists, isSnapshotFresh } from '@navisai/core/snapshot'
 import { Agent as UndiciAgent } from 'undici'
 
 const execAsync = promisify(exec)
@@ -231,6 +233,47 @@ function escapeAppleScriptCommand(command) {
   return command.replaceAll('"', '\\\\"').replaceAll('\\n', '\\\\n')
 }
 
+async function runPreflightGate(context) {
+  if (platform() !== 'darwin') return true
+  console.log(`\nPreflight checks (${context})...`)
+  const result = await runPreflightChecks()
+  if (result.ok) {
+    console.log('✅ Preflight checks passed')
+    return true
+  }
+  console.log('❌ Preflight checks failed:')
+  result.checks.forEach((check) => {
+    const status = check.ok ? 'ok' : 'fail'
+    console.log(`   - ${check.name}: ${status}${check.error ? ` (${check.error})` : ''}`)
+  })
+  console.log('   Fix the issues above before retrying setup.')
+  console.log('   If mDNSResponder is down, reboot or clear policy overrides first.')
+  return false
+}
+
+async function runSnapshotGate(context) {
+  const preflightOk = await runPreflightGate(context)
+  if (!preflightOk) return false
+  if (platform() !== 'darwin') return true
+  try {
+    const snapshotState = await readSnapshotState()
+    const exists = await navisSnapshotExists(snapshotState)
+    const fresh = isSnapshotFresh(snapshotState)
+    if (exists && fresh) {
+      console.log('✅ Navis snapshot is fresh')
+      return true
+    }
+    console.log('Creating Navis snapshot...')
+    await refreshNavisSnapshot()
+    console.log('✅ Navis snapshot recorded')
+    return true
+  } catch (error) {
+    console.log(`❌ Snapshot creation failed: ${error.message}`)
+    console.log('   Fix system health issues and retry.')
+    return false
+  }
+}
+
 async function hasCommand(cmd) {
   try {
     await execAsync(`command -v ${cmd}`)
@@ -294,6 +337,7 @@ async function installMacOSBridge() {
       <string>${runnerPath}</string>
       <string>${bridgeEntrypoint}</string>
       <string>start</string>
+      <string>--setup-approved</string>
     </array>
 
     <key>EnvironmentVariables</key>
@@ -460,6 +504,10 @@ export async function setupCommand(options = {}) {
   if (os === 'darwin' && !skipUI) {
     console.log('\nOpening the Navis macOS Setup app...')
     try {
+      const preflightOk = await runPreflightGate('setup app')
+      if (!preflightOk) {
+        process.exit(1)
+      }
       await launchMacOSSetupApp()
       const bridgePlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
       const bridgeExists = await fs.access(bridgePlist).then(() => true).catch(() => false)
@@ -497,6 +545,11 @@ export async function setupCommand(options = {}) {
     return
   }
 
+  const snapshotOk = await runSnapshotGate('setup')
+  if (!snapshotOk) {
+    process.exit(1)
+  }
+
   console.log('\nInstalling the Navis Bridge (requires an OS admin prompt)...')
   const bridgeResult = os === 'darwin' ? await installMacOSBridge() : await installBridge(os)
 
@@ -505,7 +558,7 @@ export async function setupCommand(options = {}) {
   } else if (bridgeResult?.manualStartRequired) {
     console.log('⚠️  Bridge installed but launchd service failed to start.')
     console.log('📋 To start the bridge manually, run:')
-    console.log('   sudo node apps/daemon/src/bridge.js start')
+    console.log('   sudo node apps/daemon/src/bridge.js start --setup-approved')
     console.log('💡 The bridge files are installed and ready.')
   } else {
     console.log('✅ Bridge installation completed.')
@@ -527,6 +580,11 @@ export async function resetCommand() {
   if (!(await confirm('Remove Navis Bridge and reset setup?'))) {
     console.log('Canceled.')
     return
+  }
+
+  const snapshotOk = await runSnapshotGate('reset')
+  if (!snapshotOk) {
+    process.exit(1)
   }
 
   console.log('\nRemoving the Navis Bridge (requires admin privileges)...')
@@ -807,6 +865,55 @@ export async function doctorCommand() {
     console.log(`⚠️  Not reachable at ${CANONICAL_ORIGIN}`)
     console.log(`   ${error.message}`)
     allGood = false
+  }
+
+  console.log('\n🛡️  Safety Gates:')
+  const preflight = await runPreflightChecks()
+  if (preflight.ok) {
+    console.log('✅ Preflight: mDNS/DNS checks passed')
+  } else {
+    console.log('❌ Preflight: checks failed')
+    preflight.checks.forEach((check) => {
+      const status = check.ok ? 'ok' : 'fail'
+      console.log(`   - ${check.name}: ${status}${check.error ? ` (${check.error})` : ''}`)
+    })
+    console.log('   Resolve system DNS/mDNS health issues before running setup.')
+    allGood = false
+  }
+
+  if (os === 'darwin') {
+    const snapshotState = await readSnapshotState()
+    if (!snapshotState?.id) {
+      console.log('❌ Snapshot: no Navis snapshot recorded')
+      console.log('   Run navisai setup to create a fresh snapshot before mutations.')
+      allGood = false
+    } else {
+      const exists = await navisSnapshotExists(snapshotState)
+      const fresh = isSnapshotFresh(snapshotState)
+      if (exists && fresh) {
+        console.log(`✅ Snapshot: ${snapshotState.id}`)
+      } else if (!exists) {
+        console.log(`❌ Snapshot: ${snapshotState.id} not found`)
+        console.log('   Create a new snapshot and retry setup/bridge actions.')
+        allGood = false
+      } else {
+        console.log(`⚠️  Snapshot: ${snapshotState.id} is stale`)
+        console.log('   Create a new snapshot before mutative actions.')
+        allGood = false
+      }
+    }
+
+    const policyResult = await execWithTimeout(
+      'defaults read /Library/Preferences/com.apple.mDNSResponder.plist NoMulticastAdvertisements 2>/dev/null || true'
+    )
+    const policyValue = policyResult.stdout?.trim()
+    if (policyValue === '1' || policyValue?.toLowerCase() === 'true') {
+      console.log('❌ mDNS policy: NoMulticastAdvertisements=true')
+      console.log('   Clear the policy override before enabling LAN routing.')
+      allGood = false
+    } else {
+      console.log('✅ mDNS policy: multicast advertisements enabled')
+    }
   }
 
   // Comprehensive bridge diagnostics

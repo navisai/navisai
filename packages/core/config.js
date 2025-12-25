@@ -23,6 +23,11 @@ const DEFAULT_CONFIG = {
     scanDepth: 3,
     maxConcurrency: 5
   },
+  safety: {
+    snapshot: {
+      freshnessHours: 24
+    }
+  },
   logging: {
     level: 'info',
     pretty: true

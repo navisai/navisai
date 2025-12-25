@@ -10,6 +10,7 @@
     "@navisai/daemon": "workspace:*",
     "@navisai/api-contracts": "workspace:*",
     "@navisai/setup-app": "workspace:*",
+    "@navisai/core": "workspace:*",
     "commander": "^12.1.0"
   }
 }

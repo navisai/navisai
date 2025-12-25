@@ -161,6 +161,7 @@ LAN access model (canonical):
 - After explicit, one-time setup (`navisai setup`), an OS-managed bridge owns port 443 and forwards to the daemon, enabling the clean LAN origin: `https://navis.local` (no port).
 - mDNS/Bonjour provides LAN name resolution and discovery for `navis.local` (see `NETWORKING.md`).
 - `navisai setup` currently launches the helper in `apps/setup-app` (`@navisai/setup-app`) so the privileged bridge/mDNS installation is gated behind a single user approval dialog before daily use.
+- Setup must refuse mutative actions unless a Navis-recorded snapshot is present and within the configured freshness window (No Snapshot = No NavisAI).
 
 Explicit guarantee:
 > NavisAI does not transmit data off-machine unless the user explicitly enables it.
@@ -199,6 +200,8 @@ NavisAI guarantees:
 - ✔ Transparent local storage
 - ✔ No background sync
 - ✔ No hidden cloud dependencies
+- ✔ Snapshot-gated mutations for privileged networking changes
+- ✔ User-space state resets are not treated as rollback signals
 
 These guarantees are **intentional, testable, and user-visible**.
 

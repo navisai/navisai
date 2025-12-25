@@ -62,6 +62,27 @@ navisai setup
 
 ## 3. What `navisai setup` must do (spec)
 
+### 3.0 Preflight + snapshot gate (blocker)
+
+Before any mutative action, setup must verify:
+
+- `ps aux | grep mDNSResponder`
+- `ps aux | grep mDNSResponderHelper`
+- `dns-sd -Q _services._dns-sd._udp local`
+- `dscacheutil -q host -a name apple.com`
+- `ls /var/run/mDNSResponder` (socket must exist)
+- `tmutil listlocalsnapshots /` (must include a Navis-recorded snapshot)
+- `defaults read /Library/Preferences/com.apple.mDNSResponder.plist` (block if `NoMulticastAdvertisements = true`)
+
+Snapshot policy:
+- Before any mutative action, delete the prior Navis-recorded snapshot only (never touch other snapshots), then create a new snapshot and record its ID.
+- Snapshot freshness is configurable; only a Navis-recorded snapshot within the freshness window satisfies the gate.
+
+If any check fails, setup must refuse to proceed and provide guided repair steps. No automatic fixes.
+
+Prohibited actions:
+- Do not restore/merge `SystemConfiguration` folders or copy old plists into `/Library/Preferences/SystemConfiguration`.
+
 ### 3.1 Packet forwarding service
 
 Requirements:
@@ -84,6 +105,7 @@ Packet forwarding by platform:
 
 macOS note (encapsulation):
 - On macOS, Navis may reserve a **dedicated IP alias** on the active LAN interface and advertise `navis.local` to that alias via mDNS so `:443` interception never touches other dev tools (ServBay/nginx, etc.). This alias is chosen from the current LAN subnet and can change when switching networks (Refs: navisai-i3s, navisai-2bn).
+- PF rules must be installed under the `navisai/*` anchors only; never modify Apple default anchors. A dry-run mode is required before enabling.
 
 ### 3.2 mDNS/Bonjour for `navis.local`
 
@@ -131,9 +153,17 @@ Packet forwarding handles routing transparently.
 - Bridge status (installed/enabled, routing mode)
 - Port 443 detection (in use by other services)
 - mDNS status (`navis.local` resolution)
+- mDNS responder status (`mDNSResponder` + `mDNSResponderHelper` + socket)
+- mDNS policy status (block if `NoMulticastAdvertisements = true`)
 - TLS status (certificate validity)
 - Daemon status (`GET /status`)
 - Packet forwarding rules status
+- Snapshot status (presence + last snapshot ID)
+- Snapshot-aware rollback guidance if resolver/mDNS regressions are detected (prompt only, no auto-restore)
+
+Debugging tools:
+- `lldb` is allowed only in developer builds or Doctor mode.
+- `lldb` is forbidden for end-user flows.
 
 Example output:
 ```

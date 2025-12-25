@@ -6,6 +6,8 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import { runPreflightChecks } from '@navisai/core/preflight'
+import { readSnapshotState, recordLatestSnapshot, isSnapshotFresh, navisSnapshotExists } from '@navisai/core/snapshot'
 
 const execAsync = promisify(execCb)
 const require = createRequire(import.meta.url)
@@ -62,6 +64,15 @@ function escapeAppleScriptShell(command) {
 }
 
 export async function installMacOSBridge() {
+  const preflight = await runPreflightChecks()
+  if (!preflight.ok) {
+    const details = preflight.checks
+      .map((check) => `- ${check.name}: ${check.ok ? 'ok' : `fail (${check.error || 'unknown'})`}`)
+      .join('\n')
+    throw new Error(`Preflight checks failed:\n${details}`)
+  }
+
+  const previousSnapshot = await readSnapshotState()
   const bridgeEntrypoint = resolveDaemonBridgeEntrypoint()
   const nodePath = process.execPath
 
@@ -86,6 +97,7 @@ export async function installMacOSBridge() {
 	      <string>${runnerPath}</string>
 	      <string>${bridgeEntrypoint}</string>
 	      <string>start</string>
+	      <string>--setup-approved</string>
 	    </array>
 
     <key>EnvironmentVariables</key>
@@ -153,8 +165,18 @@ load anchor "com.apple" from "/etc/pf.anchors/com.apple"
   await writeFile(localPfConf, pfConf, 'utf8')
 
   // Enhanced setup with graceful failure handling
+  const snapshotExists = await navisSnapshotExists(previousSnapshot)
+  const snapshotFresh = isSnapshotFresh(previousSnapshot)
+  const shouldRotate = !snapshotExists || !snapshotFresh
+  const snapshotBlock = shouldRotate
+    ? previousSnapshot?.id
+      ? `\ttmutil deletelocalsnapshots "${previousSnapshot.id}" || true\n\ttmutil snapshot`
+      : '\ttmutil snapshot'
+    : ''
   const shellScript = `#!/bin/bash
-	set -euo pipefail
+\tset -euo pipefail
+\t# Navis snapshot gate (mutations must be preceded by a fresh snapshot)
+${snapshotBlock}
 
 	# Install a root-owned runner; launchd can refuse to bootstrap LaunchDaemons that directly
 	# execute user-owned Homebrew binaries (common cause of I/O error on bootstrap).
@@ -206,7 +228,7 @@ fi
 	  /bin/launchctl kickstart -k system/com.navisai.bridge >/dev/null 2>&1 || true
 	  echo "SUCCESS: Bridge service installed and started via launchd"
 	else
-	  echo "FALLBACK: Bridge files installed, start manually with: sudo node '${bridgeEntrypoint}' start"
+	  echo "FALLBACK: Bridge files installed, start manually with: sudo node '${bridgeEntrypoint}' start --setup-approved"
 	fi
 `
 
@@ -217,6 +239,7 @@ fi
     // Make script executable and run it with admin privileges
     const script = `do shell script "chmod +x '${tempScript}' && '${tempScript}'" with administrator privileges`
     const result = await execAsync(`osascript -e "${escapeAppleScriptShell(script)}"`)
+    await recordLatestSnapshot()
     return result.stdout || result
   } finally {
     // Clean up temp script
@@ -236,11 +259,29 @@ fi
 }
 
 export async function uninstallMacOSBridge() {
+  const preflight = await runPreflightChecks()
+  if (!preflight.ok) {
+    const details = preflight.checks
+      .map((check) => `- ${check.name}: ${check.ok ? 'ok' : `fail (${check.error || 'unknown'})`}`)
+      .join('\n')
+    throw new Error(`Preflight checks failed:\n${details}`)
+  }
+
+  const previousSnapshot = await readSnapshotState()
   const systemPlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
   const systemPfConf = '/etc/pf.conf'
   const systemPfConfBackup = '/etc/pf.conf.backup'
+  const snapshotExists = await navisSnapshotExists(previousSnapshot)
+  const snapshotFresh = isSnapshotFresh(previousSnapshot)
+  const shouldRotate = !snapshotExists || !snapshotFresh
+  const snapshotBlock = shouldRotate
+    ? previousSnapshot?.id
+      ? `tmutil deletelocalsnapshots "${previousSnapshot.id}" || true; tmutil snapshot`
+      : 'tmutil snapshot'
+    : ''
   const shellCommand = [
     'set -euo pipefail',
+    snapshotBlock || 'true',
     `launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true`,
     `rm -f "${systemPlist}"`,
     // Restore original pf.conf if backup exists
@@ -248,6 +289,7 @@ export async function uninstallMacOSBridge() {
   ].join('; ')
 
   await runMacOSAdminShell(shellCommand)
+  await recordLatestSnapshot()
 }
 
 export async function runLinuxAdminShell(shellCommand) {
@@ -280,7 +322,7 @@ Environment=NAVIS_BRIDGE_HOST=0.0.0.0
 Environment=NAVIS_BRIDGE_PORT=443
 Environment=NAVIS_DAEMON_HOST=127.0.0.1
 Environment=NAVIS_DAEMON_PORT=47621
-ExecStart=${nodePath} ${bridgeEntrypoint}
+ExecStart=${nodePath} ${bridgeEntrypoint} start --setup-approved
 Restart=always
 RestartSec=1
 
@@ -321,7 +363,7 @@ export async function runWindowsAdminCommand(command) {
 export async function installWindowsBridge() {
   const bridgeEntrypoint = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'daemon', 'src', 'bridge.js')
   const nodePath = process.execPath
-  const binPath = `"${nodePath}" "${bridgeEntrypoint}"`
+  const binPath = `"${nodePath}" "${bridgeEntrypoint}" start --setup-approved`
   const commands = [
     'sc stop navisai-bridge 2>$null || true',
     'sc delete navisai-bridge 2>$null || true',

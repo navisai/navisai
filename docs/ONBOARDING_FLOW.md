@@ -27,6 +27,19 @@ navisai setup
 
 Setup responsibilities (explicit user consent; may require admin privileges):
 
+Preflight gate (blocker):
+- `ps aux | grep mDNSResponder`
+- `ps aux | grep mDNSResponderHelper`
+- `dns-sd -Q _services._dns-sd._udp local`
+- `dscacheutil -q host -a name apple.com`
+- `ls /var/run/mDNSResponder` (socket must exist)
+- `tmutil listlocalsnapshots /` (must include a Navis-recorded snapshot)
+- `defaults read /Library/Preferences/com.apple.mDNSResponder.plist` (block if `NoMulticastAdvertisements = true`)
+
+Snapshot policy:
+- Before any mutative action, delete the prior Navis-recorded snapshot only (never touch other snapshots), then create a new snapshot and record its ID.
+- Snapshot freshness is configurable; only a Navis-recorded snapshot within the freshness window satisfies the gate.
+
 1. Install **packet forwarding rules** that selectively route navis.local traffic (443 → daemon port 47621).
 2. Enable mDNS/Bonjour so `navis.local` resolves on the LAN to the host machine’s LAN IP.
 3. Generate/refresh local certificates for `navis.local` (used by the daemon).

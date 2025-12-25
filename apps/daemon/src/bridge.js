@@ -21,6 +21,8 @@ import { platform, networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import multicastDns from 'multicast-dns'
 import { TransparentHTTPSProxy } from './transparent-proxy.js'
+import { runPreflightChecks } from '@navisai/core/preflight'
+import { refreshNavisSnapshot, readSnapshotState, isSnapshotFresh, navisSnapshotExists } from '@navisai/core/snapshot'
 
 const listenPort = 443
 const targetHost = '127.0.0.1'
@@ -28,6 +30,10 @@ const targetPort = 47621
 const targetDomain = 'navis.local'
 const mdnsServiceType = '_navisai._tcp.local'
 const mdnsServiceInstance = 'NavisAI._navisai._tcp.local'
+
+function isSetupApproved() {
+  return process.argv.includes('--setup-approved') || process.env.NAVIS_SETUP_APPROVED === '1'
+}
 
 class PacketForwardingBridge {
   constructor() {
@@ -148,6 +154,32 @@ class PacketForwardingBridge {
 
   async start() {
     try {
+      if (!isSetupApproved()) {
+        console.error('❌ Bridge start blocked: setup approval missing.')
+        console.error('   Run: navisai setup (or use --setup-approved for explicit admin runs).')
+        process.exit(1)
+      }
+
+      const preflight = await runPreflightChecks()
+      if (!preflight.ok) {
+        console.error('❌ Preflight checks failed:')
+        preflight.checks.forEach((check) => {
+          const status = check.ok ? 'ok' : 'fail'
+          console.error(`   - ${check.name}: ${status}${check.error ? ` (${check.error})` : ''}`)
+        })
+        console.error('   Fix system health issues and retry.')
+        process.exit(1)
+      }
+
+      if (this.platform === 'darwin') {
+        const snapshotState = await readSnapshotState()
+        const exists = await navisSnapshotExists(snapshotState)
+        const fresh = isSnapshotFresh(snapshotState)
+        if (!exists || !fresh) {
+          await refreshNavisSnapshot()
+        }
+      }
+
       console.log(`🚀 Starting Navis Packet Forwarding Bridge...`)
       console.log(`Platform: ${this.platform}`)
       console.log(`Domain: ${targetDomain}`)

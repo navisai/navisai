@@ -87,6 +87,27 @@ Implementation note:
 
 ## 4. Setup vs Daily Use (Human-in-the-loop)
 
+### 4.0 Preflight + snapshot gate (blocker)
+
+Navis must refuse mutative setup actions unless all preflight checks pass and a Navis-created snapshot is recorded:
+
+- `ps aux | grep mDNSResponder`
+- `ps aux | grep mDNSResponderHelper`
+- `dns-sd -Q _services._dns-sd._udp local`
+- `dscacheutil -q host -a name apple.com`
+- `ls /var/run/mDNSResponder` (socket must exist)
+- `tmutil listlocalsnapshots /` (must include a Navis-recorded snapshot)
+- `defaults read /Library/Preferences/com.apple.mDNSResponder.plist` (block if `NoMulticastAdvertisements = true`)
+
+Snapshot policy:
+- Before any mutative action, delete the prior Navis-recorded snapshot only (never touch other snapshots), then create a new snapshot and record its ID.
+- Snapshot freshness is configurable; only a Navis-recorded snapshot within the freshness window satisfies the gate.
+
+If any check fails, Navis must block setup/bridge mutations and provide guided repair steps. No automatic fixes.
+
+Prohibited actions:
+- Do not restore/merge `SystemConfiguration` folders or copy old plists into `/Library/Preferences/SystemConfiguration`.
+
 ### 4.1 One-time setup (explicit user consent)
 
 `navisai setup` performs OS-level configuration:
@@ -97,6 +118,7 @@ Implementation note:
 - Detects existing port 443 usage but proceeds regardless (no conflicts).
 - Installs OS service for managing packet forwarding rules.
 - On macOS, installs `pf` anchor points into `/etc/pf.conf` (high-risk) so the `navisai/*` anchors are reachable by `pfctl` (Refs: navisai-7yr).
+- Requires a verified local APFS snapshot before mutating PF, mDNS, or TLS state.
 
 This step may require admin privileges once. It's explicit, reversible, and never silent.
 
@@ -134,6 +156,8 @@ If a non‑Navis local HTTPS service starts showing “Not secure” after setup
 - The long-term fix for true encapsulation is to give `navis.local` a dedicated IP (IP alias) and redirect only that IP, so other `:443` services are never intercepted at all (Refs: navisai-i3s).
   - This dedicated IP is auto-chosen from the current LAN subnet and is **per-network** (it can change when you switch networks/SSIDs) (Refs: navisai-2bn).
   - The bridge re-evaluates the alias on LAN changes and reloads pf rules to keep routing bound to the current subnet (Refs: navisai-2bn).
+  - PF rules must live exclusively under the `navisai/*` anchors; never touch Apple default anchors.
+  - PF rule installs must support a dry-run mode and require a snapshot before enabling.
 
 ### 5.2 Implementation by Platform
 

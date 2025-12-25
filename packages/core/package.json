@@ -6,6 +6,8 @@
   "main": "config.js",
   "exports": {
     ".": "./config.js",
-    "./config": "./config.js"
+    "./config": "./config.js",
+    "./preflight": "./preflight.js",
+    "./snapshot": "./snapshot.js"
   }
 }
