@@ -367,43 +367,16 @@ async function installMacOSBridge() {
 
   await fs.writeFile(localPlist, plist, 'utf8')
 
-  // Create pf.conf with navisai anchors
-  const pfConf = `#
-# Default PF configuration file with NavisAI support
-#
-# This file contains the main ruleset, which gets automatically loaded
-# at startup.  PF will not be automatically enabled, however.  Instead,
-# each component which utilizes PF is responsible for enabling and disabling
-# PF via -E and -X as documented in pfctl(8).  That will ensure that PF
-# is disabled only when the last enable reference is released.
-#
-# Care must be taken to ensure that the main ruleset does not get flushed,
-# as the nested anchors rely on the anchor point defined here. In addition,
-# to the anchors loaded by this file, some system services would dynamically
-# insert anchors into the main ruleset. These anchors will be added only when
-# the system service is used and would removed on termination of the service.
-#
-# See pf.conf(5) for syntax.
-#
-
-#
-# com.apple anchor point
-#
-scrub-anchor "com.apple/*"
-nat-anchor "com.apple/*"
-rdr-anchor "com.apple/*"
-rdr-anchor "navisai/*"
-dummynet-anchor "com.apple/*"
-anchor "com.apple/*"
-anchor "navisai/*"
-load anchor "com.apple" from "/etc/pf.anchors/com.apple"
-`
-
-  const localPfConf = path.join(localDir, 'pf.conf')
   const systemPfConf = '/etc/pf.conf'
   const systemPfConfBackup = '/etc/pf.conf.backup'
-
-  await fs.writeFile(localPfConf, pfConf, 'utf8')
+  const pfAnchorBlock = [
+    '',
+    '# NavisAI anchors (do not modify Apple anchors)',
+    'nat-anchor "navisai/*"',
+    'rdr-anchor "navisai/*"',
+    'anchor "navisai/*"',
+    ''
+  ].join('\n')
 
   const shellCommand = [
     'set -euo pipefail',
@@ -421,8 +394,15 @@ load anchor "com.apple" from "/etc/pf.anchors/com.apple"
     `chown root:wheel /var/log/navis-bridge.log /var/log/navis-bridge.err`,
     // Backup existing pf.conf if it exists and hasn't been backed up
     `if [ -f "${systemPfConf}" ] && [ ! -f "${systemPfConfBackup}" ]; then cp "${systemPfConf}" "${systemPfConfBackup}"; fi`,
-    // Install updated pf.conf if it doesn't have navisai anchors
-    `if ! grep -q "rdr-anchor \\"navisai/\\"" "${systemPfConf}" 2>/dev/null; then install -m 0644 "${localPfConf}" "${systemPfConf}"; fi`,
+    // Add navisai anchors without overwriting existing pf.conf, validate with dry-run
+    `if ! grep -q "navisai/\\"" "${systemPfConf}" 2>/dev/null; then ` +
+      `tmpPf="$(mktemp /var/tmp/navis-pf.XXXXXX)"; ` +
+      `if [ -f "${systemPfConf}" ]; then cat "${systemPfConf}" > "$tmpPf"; fi; ` +
+      `printf '%s\\n' '${pfAnchorBlock.replace(/'/g, "'\\''")}' >> "$tmpPf"; ` +
+      `pfctl -nf "$tmpPf"; ` +
+      `if [ -f "${systemPfConf}" ]; then printf '%s\\n' '${pfAnchorBlock.replace(/'/g, "'\\''")}' >> "${systemPfConf}"; else install -m 0644 "$tmpPf" "${systemPfConf}"; fi; ` +
+      `rm -f "$tmpPf"; ` +
+      `fi`,
     // Load the service
     `launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true`,
     // If the service was previously disabled (e.g., via System Settings → Login Items), bootstrap can fail.
@@ -878,6 +858,9 @@ export async function doctorCommand() {
       console.log(`   - ${check.name}: ${status}${check.error ? ` (${check.error})` : ''}`)
     })
     console.log('   Resolve system DNS/mDNS health issues before running setup.')
+    if (preflight.checks.some((check) => check.name === 'OCLP detected' && !check.ok)) {
+      console.log('   OCLP detected: enable extra safeguards and verify snapshot gating before proceeding.')
+    }
     allGood = false
   }
 

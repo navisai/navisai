@@ -120,6 +120,31 @@ export async function runPreflightChecks() {
   const mdnsPolicy = await checkMdnsPolicy()
   results.push({ name: 'mDNS policy', ...mdnsPolicy })
 
+  const oclp = await detectOclp()
+  results.push({ name: 'OCLP detected', ...oclp })
+
   const ok = results.every((check) => check.ok)
   return { ok, checks: results }
+}
+
+export async function detectOclp() {
+  if (platform() !== 'darwin') return { ok: true, detected: false }
+  const paths = [
+    '/System/Library/CoreServices/OpenCore-Legacy-Patcher.app',
+    '/Applications/OpenCore Legacy Patcher.app',
+    '/Applications/OpenCore-Patcher.app',
+    '/Library/Application Support/OpenCore-Patcher',
+    '/Library/Application Support/OpenCore Legacy Patcher'
+  ]
+
+  for (const candidate of paths) {
+    try {
+      await access(candidate)
+      return { ok: false, detected: true, error: `OCLP detected: ${candidate}` }
+    } catch {
+      // ignore
+    }
+  }
+
+  return { ok: true, detected: false }
 }
