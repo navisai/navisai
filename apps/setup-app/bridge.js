@@ -192,10 +192,10 @@ ${snapshotBlock}
 	# execute user-owned Homebrew binaries (common cause of I/O error on bootstrap).
 	install -d -m 0755 "/usr/local/libexec"
 	cat > "${runnerPath}" <<'NAVIS_RUNNER'
-	#!/bin/sh
-	set -e
-	exec "${nodePath}" "$@"
-	NAVIS_RUNNER
+#!/bin/sh
+set -e
+exec "${nodePath}" "$@"
+NAVIS_RUNNER
 	chmod 0755 "${runnerPath}"
 	chown root:wheel "${runnerPath}"
 \tls -l "${runnerPath}" || true
