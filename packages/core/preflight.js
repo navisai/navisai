@@ -19,21 +19,36 @@ async function execWithTimeout(command, timeoutMs = 5000) {
 }
 
 async function isProcessRunning(name) {
-  if (await hasCommand('pgrep')) {
+  if (!(await hasCommand('launchctl'))) {
+    return { ok: false, error: 'launchctl not available' }
+  }
+
+  const labelCandidates = name === 'mDNSResponderHelper'
+    ? [
+        'com.apple.mDNSResponderHelper',
+        'com.apple.mDNSResponderHelper.reloaded',
+        'com.apple.mDNSResponder_Helper'
+      ]
+    : [
+        'com.apple.mDNSResponder',
+        'com.apple.mDNSResponder.reloaded',
+        'com.apple.mDNSResponder.dnsproxy',
+        'com.apple.mDNSResponder.control'
+      ]
+
+  for (const label of labelCandidates) {
     try {
-      await execWithTimeout(`pgrep -x "${name}"`)
-      return true
+      const { stdout } = await execWithTimeout(`launchctl print system/${label} 2>/dev/null || true`)
+      if (!stdout.trim()) continue
+      const state = stdout.match(/\bstate = (\w+)/)?.[1]
+      const pid = stdout.match(/\bpid = (\d+)/)?.[1]
+      if (state === 'running' || pid) return { ok: true }
     } catch {
-      return false
+      // continue to next label
     }
   }
 
-  try {
-    const { stdout } = await execWithTimeout(`ps -ax -o comm= | grep -E "^${name}$" || true`)
-    return stdout.trim().length > 0
-  } catch {
-    return false
-  }
+  return { ok: false, error: `${name} not running` }
 }
 
 async function checkMdnsSocket() {
@@ -106,10 +121,10 @@ export async function runPreflightChecks() {
   const results = []
 
   const mdnsResponder = await isProcessRunning('mDNSResponder')
-  results.push({ name: 'mDNSResponder', ok: mdnsResponder })
+  results.push({ name: 'mDNSResponder', ...mdnsResponder })
 
   const mdnsHelper = await isProcessRunning('mDNSResponderHelper')
-  results.push({ name: 'mDNSResponderHelper', ok: mdnsHelper })
+  results.push({ name: 'mDNSResponderHelper', ...mdnsHelper })
 
   const mdnsSocket = await checkMdnsSocket()
   results.push({ name: 'mDNSResponder socket', ...mdnsSocket })
