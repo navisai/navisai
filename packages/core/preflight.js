@@ -57,6 +57,9 @@ async function checkDnsSdQuery() {
     )
     return { ok: true }
   } catch (error) {
+    if (error?.code === 'ETIMEDOUT' || error?.signal === 'SIGTERM') {
+      return { ok: true, warning: 'dns-sd query timed out' }
+    }
     return { ok: false, error: error.message }
   }
 }

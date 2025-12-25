@@ -271,6 +271,10 @@ async function runPreflightGate(context) {
         if (!ok) return false
       }
     }
+    const warnings = result.checks.filter((check) => check.warning)
+    warnings.forEach((check) => {
+      console.log(`⚠️  ${check.name}: ${check.warning}`)
+    })
     return true
   }
   console.log('❌ Preflight checks failed:')
@@ -890,6 +894,11 @@ export async function doctorCommand() {
     if (preflight.checks.some((check) => check.name === 'OCLP detected' && check.detected)) {
       console.log('⚠️  OCLP detected: stricter safeguards apply')
     }
+    preflight.checks
+      .filter((check) => check.warning)
+      .forEach((check) => {
+        console.log(`⚠️  ${check.name}: ${check.warning}`)
+      })
   } else {
     console.log('❌ Preflight: checks failed')
     preflight.checks.forEach((check) => {
