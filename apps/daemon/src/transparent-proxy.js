@@ -31,6 +31,9 @@ export class TransparentHTTPSProxy {
 
     this.server = null
     this.isRunning = false
+    this.aliasListener = null
+    this.aliasListenerAddress = null
+    this.aliasListenerRestartTimer = null
     this.connections = new Set()
     this.devServerDetector = null
     this.httpsServers = new Map()
@@ -72,6 +75,135 @@ export class TransparentHTTPSProxy {
 
   setEnableLoopbackRdr(enabled) {
     this.options.enableLoopbackRdr = Boolean(enabled)
+  }
+
+  async canBindPort(host, port) {
+    return new Promise((resolve) => {
+      const server = createServer()
+      let resolved = false
+      const finish = (result) => {
+        if (resolved) return
+        resolved = true
+        resolve(result)
+      }
+
+      server.once('error', (error) => {
+        finish({ available: false, errorCode: error.code || 'UNKNOWN' })
+      })
+
+      server.listen(port, host, () => {
+        server.close(() => finish({ available: true }))
+      })
+    })
+  }
+
+  async waitForProxyReady({ timeoutMs = 3000, intervalMs = 150 } = {}) {
+    const deadline = Date.now() + timeoutMs
+
+    while (Date.now() < deadline) {
+      const ready = await new Promise((resolve) => {
+        const socket = createConnection({ host: '127.0.0.1', port: this.options.proxyPort })
+        const done = (ok) => {
+          socket.destroy()
+          resolve(ok)
+        }
+        socket.once('connect', () => done(true))
+        socket.once('error', () => done(false))
+      })
+
+      if (ready) return true
+      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    }
+
+    return false
+  }
+
+  async startAliasListener(aliasIp) {
+    if (!aliasIp) return false
+
+    if (this.aliasListener && this.aliasListenerAddress === aliasIp) {
+      return true
+    }
+
+    await this.stopAliasListener()
+
+    const proxyReady = await this.waitForProxyReady()
+    if (!proxyReady) {
+      logger.warn({ aliasIp }, 'Alias listener skipped: proxy not ready')
+      return false
+    }
+
+    return new Promise((resolve) => {
+      const server = createServer((clientSocket) => {
+        const targetSocket = createConnection({ host: '127.0.0.1', port: this.options.proxyPort })
+        clientSocket.pipe(targetSocket)
+        targetSocket.pipe(clientSocket)
+
+        const closeBoth = () => {
+          if (!clientSocket.destroyed) clientSocket.destroy()
+          if (!targetSocket.destroyed) targetSocket.destroy()
+        }
+        clientSocket.on('error', closeBoth)
+        targetSocket.on('error', closeBoth)
+      })
+
+      const onError = (error) => {
+        logger.error({ error: error.message, aliasIp }, 'Alias listener error')
+        server.close()
+        if (!this.aliasListenerRestartTimer) {
+          this.aliasListenerRestartTimer = setTimeout(() => {
+            this.aliasListenerRestartTimer = null
+            this.startAliasListener(aliasIp).catch(() => {})
+          }, 2000)
+        }
+        resolve(false)
+      }
+
+      server.once('error', onError)
+
+      server.listen(443, aliasIp, async () => {
+        this.aliasListener = server
+        this.aliasListenerAddress = aliasIp
+        logger.info({ aliasIp }, 'Alias listener active on port 443')
+
+        const healthy = await this.verifyAliasListener(aliasIp)
+        if (!healthy) {
+          logger.warn({ aliasIp }, 'Alias listener health check failed; keeping listener active')
+        }
+
+        resolve(true)
+      })
+    })
+  }
+
+  async verifyAliasListener(aliasIp) {
+    return new Promise((resolve) => {
+      const socket = createConnection({ host: aliasIp, port: 443 })
+      const done = (ok) => {
+        socket.destroy()
+        resolve(ok)
+      }
+      socket.once('connect', () => done(true))
+      socket.once('error', () => done(false))
+      socket.setTimeout(1500, () => done(false))
+    })
+  }
+
+  async stopAliasListener() {
+    if (this.aliasListenerRestartTimer) {
+      clearTimeout(this.aliasListenerRestartTimer)
+      this.aliasListenerRestartTimer = null
+    }
+
+    if (!this.aliasListener) return
+
+    const address = this.aliasListenerAddress
+    await new Promise((resolve) => {
+      this.aliasListener.close(() => resolve())
+    })
+    this.aliasListener = null
+    this.aliasListenerAddress = null
+    logger.info({ aliasIp: address }, 'Alias listener stopped')
   }
 
   async reloadPfRules() {
@@ -201,6 +333,9 @@ export class TransparentHTTPSProxy {
    * Create pfctl rules for redirecting port 443 to our proxy
    */
   async createPfRules() {
+    if (process.platform === 'darwin' && !Array.isArray(this.options.redirectIps)) {
+      throw new Error('macOS redirect requires explicit alias IPs; refusing to load pf rules')
+    }
     const localIps = this.getLocalIPv4Addresses()
 
     if (localIps.length === 0) {
@@ -226,6 +361,10 @@ export class TransparentHTTPSProxy {
         )
       }
     }
+
+    filterRules.push(
+      `pass in quick on lo0 inet proto tcp from any to 127.0.0.1 port ${this.options.proxyPort} keep state`
+    )
 
     const natConfig = natRules.join('\n')
     const filterConfig = filterRules.join('\n')
@@ -271,6 +410,16 @@ export class TransparentHTTPSProxy {
     }
 
     try {
+      if (process.platform === 'darwin') {
+        if (!Array.isArray(this.options.redirectIps) || this.options.redirectIps.length === 0) {
+          throw new Error('macOS redirect requires reserved alias IPs; refusing to start transparent proxy')
+        }
+        const redirectIps = this.getLocalIPv4Addresses()
+        if (!Array.isArray(redirectIps) || redirectIps.length === 0) {
+          throw new Error('macOS redirect requires reserved alias IPs; refusing to start transparent proxy')
+        }
+      }
+
       // Ensure pf is enabled
       try {
         await this.execCommand('sudo pfctl -e')
@@ -310,7 +459,7 @@ export class TransparentHTTPSProxy {
       })
 
       // Start listening
-      this.server.listen(this.options.proxyPort, () => {
+      this.server.listen(this.options.proxyPort, '127.0.0.1', () => {
         logger.info(`Transparent HTTPS proxy listening on port ${this.options.proxyPort}`)
         this.isRunning = true
       })
@@ -497,6 +646,8 @@ export class TransparentHTTPSProxy {
 
     logger.info('Stopping transparent proxy...')
 
+    await this.stopAliasListener()
+
     // Close all connections
     for (const socket of this.connections) {
       if (!socket.destroyed) {
@@ -529,7 +680,7 @@ export class TransparentHTTPSProxy {
    */
   execCommand(command) {
     return new Promise((resolve, reject) => {
-      const child = spawn(command, [], { shell: true, stdio: ['pipe', 'pipe', 'pipe'] })
+      const child = spawn(this.normalizeCommand(command), [], { shell: true, stdio: ['pipe', 'pipe', 'pipe'] })
       let stderr = ''
 
       child.stderr?.on('data', (data) => {
@@ -548,6 +699,13 @@ export class TransparentHTTPSProxy {
       })
       child.on('error', reject)
     })
+  }
+
+  normalizeCommand(command) {
+    if (typeof process.getuid === 'function' && process.getuid() === 0) {
+      return command.replace(/\bsudo\s+-n\s+/g, '').replace(/\bsudo\s+/g, '')
+    }
+    return command
   }
 
   /**

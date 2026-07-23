@@ -20,8 +20,8 @@
 	}
 
 	async function handleQuickScan() {
-		const homeDir = '/Users/vsmith' // TODO (Refs: navisai-wc6): Get from API or browser
-		await projectsStore.scanDirectory(homeDir, { depth: 2 })
+		// An empty path asks the authenticated daemon to scan its own home directory.
+		await projectsStore.scanDirectory('', { depth: 2 })
 	}
 </script>
 

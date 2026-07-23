@@ -66,14 +66,23 @@ async function checkDnsSdQuery() {
   }
 
   try {
-    await execWithTimeout(
-      `perl -e 'alarm 3; exec "dns-sd", "-Q", "_services._dns-sd._udp", "local"' 2>/dev/null || true`,
-      5000
+    const { stdout } = await execWithTimeout(
+      'dns-sd -Q _services._dns-sd._udp local',
+      3000
     )
-    return { ok: true }
+    if (stdout.includes('No Such Record') || stdout.includes('Add')) {
+      return { ok: true }
+    }
+    return { ok: false, error: 'dns-sd returned no response' }
   } catch (error) {
-    if (error?.code === 'ETIMEDOUT' || error?.signal === 'SIGTERM') {
-      return { ok: true, warning: 'dns-sd query timed out' }
+    const stdout = error?.stdout ?? ''
+    const stderr = error?.stderr ?? ''
+    const combined = `${stdout}\n${stderr}`.trim()
+    if (/service not running/i.test(combined)) {
+      return { ok: false, error: 'dns-sd service not running' }
+    }
+    if (stdout.includes('No Such Record') || stdout.includes('Add')) {
+      return { ok: true, warning: 'dns-sd timed out after response' }
     }
     return { ok: false, error: error.message }
   }

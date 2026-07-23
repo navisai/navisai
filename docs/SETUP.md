@@ -23,7 +23,12 @@ To make this work without requiring users to run `sudo` for daily usage, Navis r
 3. Generates/refreshes local TLS material for `navis.local` only.
 4. **Zero conflicts with existing services** - other development tools and HTTPS services continue working normally.
 5. **Auto-detects local development servers** and creates convenient domain mappings (e.g., app.localhost, api.localhost).
-6. Guides device trust for mobile clients (iOS requires explicit trust for local certificates).
+6. Requires desktop certificate trust before setup completes and guides mobile trust before pairing.
+
+Scope rule:
+- All recommendations must stay within documented behavior in `docs/`.
+- If a suggestion is outside documented scope, explicitly label it and explain why it is being raised.
+- Never recommend changes to user development tools or services to resolve Navis conflicts.
 
 This step is explicit, user-consented, and reversible.
 
@@ -118,17 +123,22 @@ Requirements:
   - Service name: `_navisai._tcp.local`
   - TXT records: `tls=1`, `version=1`, `origin=https://navis.local`
 
-### 3.3 Certificates and trust
+### 3.3 Certificates and trust (required)
 
 Requirements:
 
 - The daemon serves HTTPS with a certificate valid for `navis.local`.
 - The bridge must not mint/serve certificates for non‑Navis domains.
-- Setup generates and stores cert material under `~/.navis/certs/`:
-  - `~/.navis/certs/navis.local.crt`
-  - `~/.navis/certs/navis.local.key`
+- Setup generates a local Navis CA and a leaf cert for `navis.local` and stores them under `~/.navis/certs/`:
+  - `~/.navis/certs/navis.local-ca.crt`
+  - `~/.navis/certs/navis.local-ca.key`
+  - `~/.navis/certs/navis.local.crt` (leaf)
+  - `~/.navis/certs/navis.local.key` (leaf key)
+- Leaf cert must include explicit DNS SANs (at minimum `navis.local`) and EKU `serverAuth`.
+- The daemon must serve the full chain (leaf + CA).
 - For forwarding to user's app: pass through original TLS unchanged
-- iOS trust guidance provided in onboarding
+- Setup must guide desktop trust (Keychain) and block completion until trust is confirmed by OS trust settings.
+- iOS trust guidance provided in onboarding; mobile trust is required before pairing.
 
 ---
 
@@ -145,6 +155,12 @@ Access URLs:
 - Your app: continues working as before (domain-based routing separates traffic)
 
 Packet forwarding handles routing transparently.
+
+Mobile LAN validation:
+1. Connect phone to the same Wi‑Fi as the host (disable cellular).
+2. Open `https://navis.local/welcome`.
+3. If it fails, verify client isolation is disabled on the router and confirm `navis.local` resolves on the host.
+4. As a fallback, try `https://<LAN_IP>/status` to confirm reachability (expect a cert warning).
 
 ---
 
@@ -185,7 +201,7 @@ Example output:
 - Disable/remove the bridge service
 - **Preserve user's port 443 service** - uninstall should not break their app
 - Stop mDNS advertising
-- Remove local certificates (optional, with confirmation)
+- Remove local certificates and Keychain trust after explicit pre-removal notice (with confirmation)
 
 The bridge uninstall must:
 1. Stop the bridge process
@@ -204,7 +220,7 @@ For repeatable onboarding tests, Navis supports a **confirm-gated** cleanup comm
 - `navisai cleanup --bridge-only` (safe/default):
   - Removes bridge service only
   - Does NOT affect the user's port 443 applications
-  - Optionally removes TLS certs
+  - Removes TLS certs with confirmation and pre-removal notice for Keychain trust
   - Preserves all Navis data
   - After cleanup, `https://navis.local` is expected to be unreachable until `navisai setup` is run again.
 

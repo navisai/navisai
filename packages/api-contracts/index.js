@@ -16,7 +16,7 @@ export const NAVIS_PATHS = /** @type {const} */ ({
   status: '/status',
   ws: '/ws',
   certs: {
-    navisLocalCrt: '/certs/navis.local.crt',
+    navisLocalCrt: '/certs/navis.local-ca.crt',
   },
   pairing: {
     request: '/pairing/request',

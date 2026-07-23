@@ -125,7 +125,7 @@ const https = require('https')
 
 class TLSManager {
   async loadCertificate() {
-    // Load from ~/.navis/certs/navis.local.crt
+    // Load from ~/.navis/certs/navis.local-ca.crt
     // Generate if not exists
   }
   

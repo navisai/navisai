@@ -69,7 +69,7 @@
           <h3>Download</h3>
         </div>
         <div class="panel-body">
-          <a href="/certs/navis.local.crt" class="btn btn-secondary">Download navis.local certificate</a>
+          <a href="/certs/navis.local-ca.crt" class="btn btn-secondary">Download Navis CA certificate</a>
           <ol class="mt-4 list-decimal pl-5 text-slate-600 space-y-2">
             <li>Open this page on your iPhone (same Wi‑Fi), then tap Download.</li>
             <li>

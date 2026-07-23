@@ -80,6 +80,8 @@ User app state resets after network service regeneration are not rollback signal
 ### Agent Safety Protocol
 
 - Review incident context, recent commits, Beads status, and confirm snapshot state before proposing changes.
+- Do not recommend actions outside documented scope; if raised, explicitly label the suggestion as outside scope and explain why.
+- Do not recommend changes to user development tools or services to resolve Navis conflicts.
 
 ---
 
@@ -99,6 +101,14 @@ Navis must not degrade the trust posture of other local HTTPS services:
 - If the bridge/proxy ever presents a Navis-signed certificate for a non‑Navis domain, browsers will flag those sites as insecure; this is a regression.
 
 Refs: navisai-288, navisai-ms0
+
+Navis certificate trust requirements:
+- Setup must block completion until `navis.local` is trusted on desktop.
+- Mobile trust is required before pairing.
+- Uninstall/reset must remove Navis trust entries after an explicit pre-removal notice.
+- `navis.local` TLS must be issued by a local Navis CA and presented as a full chain (leaf + CA).
+- Leaf cert must include explicit DNS SANs (at minimum `navis.local`) and EKU `serverAuth`.
+- Trust verification must confirm the OS trust store has an explicit SSL trust setting for the Navis CA.
 
 ### 5.2 OS-Level Security
 - Packet forwarding rules require administrator privileges for installation
@@ -129,6 +139,27 @@ Refs: navisai-288, navisai-ms0
 - Consider VPN for public WiFi usage
 - mDNS can be disabled for air-gapped environments
 - If mDNS is policy-disabled (`NoMulticastAdvertisements = true`), Navis must refuse to enable LAN routing and explain the risk.
+- If mobile LAN reachability fails, do not suggest disabling router security features; instead document client isolation/mDNS filtering checks and require explicit user opt-in for any network changes.
+
+### 6.4 mDNS Diagnostic Risk Matrix (Post-Mortem Guardrail)
+
+Navis must only suggest **non-mutative** diagnostics by default. Any **mutative** action requires:
+- A fresh Navis snapshot
+- Explicit user opt-in
+
+**Non-mutative (safe diagnostics)**:
+- `dns-sd -Q` / `dns-sd -B`
+- `dig @224.0.0.251 -p 5353 <name>`
+- `dscacheutil -q host -a name <host>`
+
+**Mutative (gated; explicit opt-in + snapshot required)**:
+- `dns-sd -R` (registers a service)
+- `killall -HUP/USR1 mDNSResponder` (runtime state change)
+- `launchctl load/unload/kickstart` for mDNSResponder
+- `defaults write /Library/Preferences/com.apple.mDNSResponder.plist ...`
+
+**Guardrail**:
+- `dns-sd -R` must never be used as an automatic workaround for mDNS failure. It is allowed only in Doctor mode with explicit user consent **after** confirming mDNS policy is not disabled (`NoMulticastAdvertisements != true`).
 
 ## 7. PWA Security
 

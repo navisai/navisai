@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir, networkInterfaces, platform } from 'node:os'
+import { createServer } from 'node:net'
 import { createRequire } from 'node:module'
 import readline from 'node:readline/promises'
 import { NAVIS_PATHS } from '@navisai/api-contracts'
@@ -18,18 +19,75 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
 
 const CANONICAL_ORIGIN = 'https://navis.local'
-const CERT_PATH = path.join(homedir(), '.navis', 'certs', 'navis.local.crt')
-const KEY_PATH = path.join(homedir(), '.navis', 'certs', 'navis.local.key')
+const CA_CERT_PATH = path.join(homedir(), '.navis', 'certs', 'navis.local-ca.crt')
+const CA_KEY_PATH = path.join(homedir(), '.navis', 'certs', 'navis.local-ca.key')
+const LEAF_CERT_PATH = path.join(homedir(), '.navis', 'certs', 'navis.local.crt')
+const LEAF_KEY_PATH = path.join(homedir(), '.navis', 'certs', 'navis.local.key')
+const CLI_LOG_PATH = path.join(homedir(), '.navis', 'logs', 'cli.log')
+
+async function logCliPrompt(event, details) {
+  try {
+    await fs.mkdir(path.dirname(CLI_LOG_PATH), { recursive: true })
+    const payload = {
+      timestamp: new Date().toISOString(),
+      event,
+      ...details
+    }
+    await fs.appendFile(CLI_LOG_PATH, `${JSON.stringify(payload)}\n`)
+  } catch {
+    // Ignore logging errors.
+  }
+}
 
 async function fetchNavis(pathOrUrl, options = {}) {
   const url = pathOrUrl.startsWith('http') ? pathOrUrl : `${CANONICAL_ORIGIN}${pathOrUrl}`
 
-  const certPem = await fs.readFile(CERT_PATH, 'utf8').catch(() => null)
+  const certPem = await fs.readFile(CA_CERT_PATH, 'utf8').catch(() => null)
   const dispatcher = new UndiciAgent({
     connect: certPem ? { ca: certPem } : { rejectUnauthorized: false },
   })
 
   return fetch(url, { ...options, dispatcher })
+}
+
+async function fetchDaemonDirect(path = NAVIS_PATHS.status, options = {}) {
+  const certPem = await fs.readFile(CA_CERT_PATH, 'utf8').catch(() => null)
+  const dispatcher = new UndiciAgent({
+    connect: certPem ? { ca: certPem } : { rejectUnauthorized: false },
+  })
+  return fetch(`https://127.0.0.1:47621${path}`, {
+    ...options,
+    headers: { Host: 'navis.local', ...(options.headers || {}) },
+    dispatcher,
+  })
+}
+
+async function isDaemonReachable() {
+  try {
+    const response = await fetchDaemonDirect()
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+async function waitForDaemonReady({ timeoutMs = 8000, intervalMs = 500 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await isDaemonReachable()) return true
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+  }
+  return false
+}
+
+async function probeLoopbackBind(port) {
+  return new Promise((resolve) => {
+    const server = createServer()
+    server.once('error', (error) => resolve({ ok: false, error }))
+    server.listen(port, '127.0.0.1', () => {
+      server.close(() => resolve({ ok: true }))
+    })
+  })
 }
 
 function getLanAddresses() {
@@ -56,15 +114,18 @@ async function resolveNavisLocal() {
   }
 }
 
-async function queryMdnsARecord(hostname, timeoutMs = 3000) {
+async function queryMdnsARecord(hostname, timeoutMs = 6000) {
   if (!(await hasCommand('dns-sd'))) {
     return { success: false, error: 'dns-sd not available' }
   }
 
+  const alarmSeconds = Math.max(2, Math.ceil(timeoutMs / 1000))
+  const execTimeout = timeoutMs + 2000
+
   try {
     const { stdout } = await execAsync(
-      `perl -e 'alarm 3; exec "dns-sd", "-Q", "${hostname}", "A"' 2>/dev/null || true`,
-      { encoding: 'utf8', timeout: timeoutMs }
+      `perl -e 'alarm ${alarmSeconds}; exec "dns-sd", "-Q", "${hostname}", "A"' 2>/dev/null || true`,
+      { encoding: 'utf8', timeout: execTimeout }
     )
     const line = stdout
       .split('\n')
@@ -73,19 +134,28 @@ async function queryMdnsARecord(hostname, timeoutMs = 3000) {
     if (!ip) return { success: false, error: `No mDNS A answer observed for ${hostname}` }
     return { success: true, address: ip }
   } catch (error) {
+    const stdout = error?.stdout ?? ''
+    const line = stdout
+      .split('\n')
+      .find((row) => row.includes(`${hostname}.`) && row.includes('Addr') && row.trim().match(/\d+\.\d+\.\d+\.\d+/))
+    const ip = line?.trim().match(/(\d+\.\d+\.\d+\.\d+)/)?.[1]
+    if (ip) return { success: true, address: ip }
     return { success: false, error: error.message }
   }
 }
 
-async function queryMdnsAAAARecord(hostname, timeoutMs = 3000) {
+async function queryMdnsAAAARecord(hostname, timeoutMs = 6000) {
   if (!(await hasCommand('dns-sd'))) {
     return { success: false, error: 'dns-sd not available' }
   }
 
+  const alarmSeconds = Math.max(2, Math.ceil(timeoutMs / 1000))
+  const execTimeout = timeoutMs + 2000
+
   try {
     const { stdout } = await execAsync(
-      `perl -e 'alarm 3; exec "dns-sd", "-Q", "${hostname}", "AAAA"' 2>/dev/null || true`,
-      { encoding: 'utf8', timeout: timeoutMs }
+      `perl -e 'alarm ${alarmSeconds}; exec "dns-sd", "-Q", "${hostname}", "AAAA"' 2>/dev/null || true`,
+      { encoding: 'utf8', timeout: execTimeout }
     )
     const line = stdout
       .split('\n')
@@ -94,19 +164,28 @@ async function queryMdnsAAAARecord(hostname, timeoutMs = 3000) {
     if (!ip) return { success: false, error: `No mDNS AAAA answer observed for ${hostname}` }
     return { success: true, address: ip }
   } catch (error) {
+    const stdout = error?.stdout ?? ''
+    const line = stdout
+      .split('\n')
+      .find((row) => row.includes(`${hostname}.`) && row.includes('Addr') && row.includes(':'))
+    const ip = line?.trim().match(/([0-9a-fA-F:]+)/)?.[1]
+    if (ip) return { success: true, address: ip }
     return { success: false, error: error.message }
   }
 }
 
-async function queryMdnsRecord(name, recordType, timeoutMs = 3000) {
+async function queryMdnsRecord(name, recordType, timeoutMs = 6000) {
   if (!(await hasCommand('dns-sd'))) {
     return { success: false, error: 'dns-sd not available' }
   }
 
+  const alarmSeconds = Math.max(2, Math.ceil(timeoutMs / 1000))
+  const execTimeout = timeoutMs + 2000
+
   try {
     const { stdout } = await execAsync(
-      `perl -e 'alarm 3; exec "dns-sd", "-Q", "${name}", "${recordType}"' 2>/dev/null || true`,
-      { encoding: 'utf8', timeout: timeoutMs }
+      `perl -e 'alarm ${alarmSeconds}; exec "dns-sd", "-Q", "${name}", "${recordType}"' 2>/dev/null || true`,
+      { encoding: 'utf8', timeout: execTimeout }
     )
     const line = stdout
       .split('\n')
@@ -115,6 +194,12 @@ async function queryMdnsRecord(name, recordType, timeoutMs = 3000) {
     if (!line) return { success: false, error: `No mDNS ${recordType} answer observed for ${name}` }
     return { success: true, line }
   } catch (error) {
+    const stdout = error?.stdout ?? ''
+    const line = stdout
+      .split('\n')
+      .map((row) => row.trim())
+      .find((row) => row.includes(`${name}.`) && row.includes(` ${recordType} `))
+    if (line) return { success: true, line }
     return { success: false, error: error.message }
   }
 }
@@ -128,35 +213,77 @@ function extractMdnsToken(line, marker) {
   return slice.split(' ')[0]?.replace(/\.$/, '') || null
 }
 
-async function browseMdnsService(serviceType, domain = 'local', timeoutMs = 3000) {
+function parsePtrTarget(line) {
+  if (!line) return null
+  if (line.includes('No Such Record')) return null
+  const match = line.match(/\bPTR\s+IN\s+(\S+)/)
+  return match?.[1]?.replace(/\.$/, '') || null
+}
+
+function parseSrvRecord(line) {
+  if (!line) return null
+  if (line.includes('No Such Record')) return null
+  const match = line.match(/\bSRV\s+IN\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)/)
+  if (!match) return null
+  return {
+    port: Number.parseInt(match[3], 10),
+    target: match[4].replace(/\.$/, '')
+  }
+}
+
+function parseTxtPayload(line) {
+  if (!line || line.includes('No Such Record')) return null
+  const bytesIndex = line.indexOf('bytes:')
+  if (bytesIndex === -1) return line
+  const hexPart = line.slice(bytesIndex + 'bytes:'.length).trim()
+  const bytes = hexPart
+    .split(/\s+/)
+    .filter((token) => /^[0-9a-fA-F]{2}$/.test(token))
+    .map((token) => Number.parseInt(token, 16))
+  if (bytes.length === 0) return line
+  return Buffer.from(bytes).toString('utf8')
+}
+
+async function browseMdnsService(serviceType, domain = 'local', timeoutMs = 6000) {
   if (!(await hasCommand('dns-sd'))) {
     return { success: false, error: 'dns-sd not available' }
   }
 
+  const alarmSeconds = Math.max(2, Math.ceil(timeoutMs / 1000))
+  const execTimeout = timeoutMs + 2000
+
   try {
     const { stdout } = await execAsync(
-      `perl -e 'alarm 3; exec "dns-sd", "-B", "${serviceType}", "${domain}"' 2>/dev/null || true`,
-      { encoding: 'utf8', timeout: timeoutMs }
+      `perl -e 'alarm ${alarmSeconds}; exec "dns-sd", "-B", "${serviceType}", "${domain}"' 2>/dev/null || true`,
+      { encoding: 'utf8', timeout: execTimeout }
     )
     const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
     const found = lines.some((l) => l.includes(serviceType))
     return { success: true, found, output: lines.slice(0, 8).join('\n') }
   } catch (error) {
+    const stdout = error?.stdout ?? ''
+    const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+    const found = lines.some((l) => l.includes(serviceType))
+    if (found) return { success: true, found, output: lines.slice(0, 8).join('\n') }
     return { success: false, error: error.message }
   }
 }
 
-async function checkTlsCertificate() {
+async function loadX509(certPath) {
+  const pem = await fs.readFile(certPath, 'utf8')
+  const { X509Certificate } = await import('node:crypto')
+  return new X509Certificate(pem)
+}
+
+async function checkCertificateValidity(certPath) {
   try {
-    const pem = await fs.readFile(CERT_PATH, 'utf8')
-    const { X509Certificate } = await import('node:crypto')
-    const cert = new X509Certificate(pem)
+    const cert = await loadX509(certPath)
     const validFrom = new Date(cert.validFrom)
     const validTo = new Date(cert.validTo)
 
     return {
       exists: true,
-      path: CERT_PATH,
+      path: certPath,
       validFrom,
       validTo,
       isExpired: validTo < new Date(),
@@ -164,16 +291,128 @@ async function checkTlsCertificate() {
   } catch (error) {
     return {
       exists: false,
+      path: certPath,
       error: error.message,
     }
+  }
+}
+
+async function readOpenSslText(certPath) {
+  const { stdout } = await execAsync(`openssl x509 -in "${certPath}" -noout -text`, { encoding: 'utf8' })
+  return stdout
+}
+
+function extractCommonName(subjectLine) {
+  const match = subjectLine.match(/CN\s*=\s*([^,\/]+)/i)
+  return match ? match[1].trim() : null
+}
+
+async function getCertSubjectIssuer(certPath) {
+  const { stdout } = await execAsync(`openssl x509 -in "${certPath}" -noout -subject -issuer`, { encoding: 'utf8' })
+  const subjectLine = stdout.split('\n').find((line) => line.includes('subject=')) ?? ''
+  const issuerLine = stdout.split('\n').find((line) => line.includes('issuer=')) ?? ''
+  return {
+    subject: subjectLine.replace(/^subject=\s*/i, '').trim(),
+    issuer: issuerLine.replace(/^issuer=\s*/i, '').trim(),
+    subjectCN: extractCommonName(subjectLine),
+    issuerCN: extractCommonName(issuerLine),
+  }
+}
+
+async function getCertSha1(certPath) {
+  try {
+    const { stdout } = await execAsync(`openssl x509 -in "${certPath}" -noout -fingerprint -sha1`, { encoding: 'utf8' })
+    const match = stdout.match(/Fingerprint=([0-9A-F:]+)/i)
+    if (!match) return null
+    return match[1].replaceAll(':', '').toUpperCase()
+  } catch {
+    return null
+  }
+}
+
+async function hasAdminTrustSettings(certPath) {
+  if (platform() !== 'darwin') return null
+  const sha1 = await getCertSha1(certPath)
+  if (!sha1) return false
+  const trustFile = path.join(homedir(), '.navis', 'trust-settings.plist')
+  try {
+    await execAsync(`security trust-settings-export -d "${trustFile}"`)
+    const { stdout } = await execAsync(`plutil -p "${trustFile}"`, { encoding: 'utf8' })
+    const lines = stdout.split('\n')
+    const index = lines.findIndex((line) => line.includes(sha1))
+    if (index === -1) return false
+    const snippet = lines.slice(index, index + 20).join('\n')
+    return snippet.includes('trustSettings')
+  } catch {
+    return false
+  } finally {
+    try {
+      await fs.unlink(trustFile)
+    } catch {
+      // Ignore cleanup errors.
+    }
+  }
+}
+
+async function checkLeafCertificate() {
+  const validity = await checkCertificateValidity(LEAF_CERT_PATH)
+  if (!validity.exists) return { ...validity, ok: false }
+
+  const text = await readOpenSslText(LEAF_CERT_PATH)
+  const hasSan = text.includes('DNS:navis.local')
+  const hasEku = text.includes('Extended Key Usage') &&
+    (text.includes('TLS Web Server Authentication') || text.includes('serverAuth'))
+  const { issuerCN } = await getCertSubjectIssuer(LEAF_CERT_PATH)
+
+  return {
+    ...validity,
+    ok: hasSan && hasEku,
+    hasSan,
+    hasEku,
+    issuerCN,
+  }
+}
+
+async function checkCaCertificate() {
+  const validity = await checkCertificateValidity(CA_CERT_PATH)
+  if (!validity.exists) return { ...validity, ok: false }
+
+  const text = await readOpenSslText(CA_CERT_PATH)
+  const isCa = text.includes('CA:TRUE')
+  const { subjectCN } = await getCertSubjectIssuer(CA_CERT_PATH)
+  const trustSettingsOk = await hasAdminTrustSettings(CA_CERT_PATH)
+
+  return {
+    ...validity,
+    ok: isCa && trustSettingsOk !== false,
+    isCa,
+    trustSettingsOk,
+    subjectCN,
+  }
+}
+
+async function checkTlsChainServed() {
+  try {
+    const { stdout } = await execAsync(
+      `openssl s_client -connect navis.local:443 -servername navis.local -CAfile "${CA_CERT_PATH}" -verify_return_error -showcerts </dev/null`,
+      { encoding: 'utf8', timeout: 8000 }
+    )
+    const certCount = (stdout.match(/BEGIN CERTIFICATE/g) || []).length
+    const verified = stdout.includes('Verify return code: 0 (ok)') || stdout.includes('Verification: OK')
+    return { ok: verified, certCount }
+  } catch (error) {
+    return { ok: false, error: error.message }
   }
 }
 
 async function removeTlsMaterials() {
   try {
     await Promise.all([
-      fs.rm(CERT_PATH, { force: true }),
-      fs.rm(KEY_PATH, { force: true }),
+      fs.rm(CA_CERT_PATH, { force: true }),
+      fs.rm(CA_KEY_PATH, { force: true }),
+      fs.rm(LEAF_CERT_PATH, { force: true }),
+      fs.rm(LEAF_KEY_PATH, { force: true }),
+      fs.rm(path.join(homedir(), '.navis', 'certs', 'navis.local-ca.srl'), { force: true }),
     ])
     return true
   } catch (error) {
@@ -199,20 +438,35 @@ function resolveBridgeEntrypoint() {
 }
 
 async function confirm(question) {
+  const start = Date.now()
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
   try {
     const answer = await rl.question(`${question} (y/N): `)
-    return answer.trim().toLowerCase() === 'y'
+    const accepted = answer.trim().toLowerCase() === 'y'
+    await logCliPrompt('confirm', {
+      question,
+      accepted,
+      elapsedMs: Date.now() - start,
+      defaultNo: true
+    })
+    return accepted
   } finally {
     rl.close()
   }
 }
 
 async function confirmTyped(promptText, requiredPhrase) {
+  const start = Date.now()
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
   try {
     const answer = await rl.question(`${promptText}\nType "${requiredPhrase}" to continue: `)
-    return answer.trim() === requiredPhrase
+    const accepted = answer.trim() === requiredPhrase
+    await logCliPrompt('confirm_typed', {
+      promptText,
+      accepted,
+      elapsedMs: Date.now() - start
+    })
+    return accepted
   } finally {
     rl.close()
   }
@@ -223,14 +477,22 @@ function escapeAppleScriptString(value) {
 }
 
 async function runMacOSAdminShell(shellCommand, options = {}) {
-  const { preferSudo = false } = options
+  const { preferSudo = false, allowSudoFallback = false } = options
+  const wrapped = `sh -c '${shellCommand.replaceAll("'", "'\\''")}'`
+
   if (preferSudo) {
-    const wrapped = `sh -c '${shellCommand.replaceAll("'", "'\\''")}'`
     return execAsync(`sudo ${wrapped}`)
   }
 
   const script = `do shell script "${escapeAppleScriptString(shellCommand)}" with administrator privileges`
-  return execAsync(`osascript -e "${escapeAppleScriptString(script)}"`)
+  try {
+    return await execAsync(`osascript -e "${escapeAppleScriptString(script)}"`)
+  } catch (error) {
+    if (!allowSudoFallback) {
+      throw error
+    }
+    return execAsync(`sudo ${wrapped}`)
+  }
 }
 
 async function runMacSetupApp() {
@@ -452,7 +714,7 @@ async function installMacOSBridge() {
     `launchctl kickstart -k system/com.navisai.bridge >/dev/null 2>&1 || true`,
   ].join('; ')
 
-  await runMacOSAdminShell(shellCommand, { preferSudo: true })
+  await runMacOSAdminShell(shellCommand, { preferSudo: false })
 }
 
 async function uninstallMacOSBridge() {
@@ -471,10 +733,10 @@ async function uninstallMacOSBridge() {
     `if [ -f "${systemPfConfBackup}" ]; then mv "${systemPfConfBackup}" "${systemPfConf}"; fi`,
   ].join('; ')
 
-  await runMacOSAdminShell(shellCommand, { preferSudo: true })
+  await runMacOSAdminShell(shellCommand, { preferSudo: false })
 }
 
-async function launchMacOSSetupApp() {
+async function launchMacOSSetupApp({ requireFreshAuth = false } = {}) {
   const setupAppPath = (() => {
     try {
       return require.resolve('@navisai/setup-app')
@@ -482,9 +744,18 @@ async function launchMacOSSetupApp() {
       return path.join(__dirname, '..', '..', 'setup-app', 'index.js')
     }
   })()
+  const consoleUid = await getConsoleUid()
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [setupAppPath], {
-      stdio: 'inherit'
+    const command = consoleUid ? 'launchctl' : process.execPath
+    const args = consoleUid
+      ? ['asuser', String(consoleUid), process.execPath, setupAppPath]
+      : [setupAppPath]
+    const child = spawn(command, args, {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        ...(requireFreshAuth ? { NAVIS_SETUP_REQUIRE_FRESH_AUTH: '1' } : {})
+      }
     })
 
     child.on('exit', (code) => {
@@ -493,6 +764,17 @@ async function launchMacOSSetupApp() {
     })
     child.on('error', (error) => reject(error))
   })
+}
+
+async function getConsoleUid() {
+  if (platform() !== 'darwin') return null
+  try {
+    const { stdout } = await execAsync('stat -f %u /dev/console', { encoding: 'utf8' })
+    const uid = stdout.trim()
+    return uid ? Number.parseInt(uid, 10) : null
+  } catch {
+    return null
+  }
 }
 
 async function openUrl(url) {
@@ -510,6 +792,20 @@ async function openUrl(url) {
   }
 }
 
+async function hasRecentLogOutput(paths, sinceMs) {
+  const checks = await Promise.all(
+    paths.map(async (logPath) => {
+      try {
+        const stat = await fs.stat(logPath)
+        return stat.mtimeMs >= sinceMs
+      } catch {
+        return false
+      }
+    })
+  )
+  return checks.some(Boolean)
+}
+
 export async function setupCommand(options = {}) {
   console.log('NavisAI Setup')
   console.log('=============\n')
@@ -520,6 +816,10 @@ export async function setupCommand(options = {}) {
   console.log('- TLS certificates and guided mobile trust\n')
 
   const { skipUI = false, autoConfirm = false } = options
+  if (options.freshAuth) {
+    process.env.NAVIS_SETUP_REQUIRE_FRESH_AUTH = '1'
+    console.log('🔐 Fresh admin authorization required for this setup run.')
+  }
 
   const os = platform()
   if (os === 'darwin' && !skipUI) {
@@ -529,7 +829,7 @@ export async function setupCommand(options = {}) {
       if (!preflightOk) {
         process.exit(1)
       }
-      await launchMacOSSetupApp()
+      await launchMacOSSetupApp({ requireFreshAuth: Boolean(options.freshAuth) })
       const bridgePlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
       const bridgeExists = await fs.access(bridgePlist).then(() => true).catch(() => false)
       const launchd = await checkLaunchdService('com.navisai.bridge')
@@ -597,25 +897,40 @@ export async function setupCommand(options = {}) {
   if (bridgeResult?.manualStartRequired) {
     console.log('- If navis.local is not reachable, start the bridge manually as shown above')
   }
+
+  const caStatus = await checkCaCertificate()
+  if (!caStatus.exists) {
+    console.log('\n⚠️  TLS CA certificate missing.')
+    console.log('   Start Navis with `navisai up` to generate the CA, then re-run setup to confirm trust.')
+    process.exit(1)
+  }
+
+  if (platform() === 'darwin' && caStatus.trustSettingsOk === false) {
+    console.log('\n⚠️  TLS CA certificate is not trusted in macOS Keychain.')
+    console.log('   Re-run setup without --skip-ui to install trust, or trust the CA in Keychain Access.')
+    process.exit(1)
+  }
 }
 
 export async function resetCommand() {
   console.log('NavisAI Reset')
   console.log('=============\n')
-  console.log('This will remove the OS bridge service and stop binding port 443.\n')
+  console.log('This will remove the OS bridge service, stop binding port 443, and remove trusted navis.local certificates.\n')
 
-  if (!(await confirm('Remove Navis Bridge and reset setup?'))) {
+  if (!(await confirm('Remove Navis Bridge, remove trusted navis.local certificate, and reset setup?'))) {
     console.log('Canceled.')
     return
   }
 
-  const snapshotOk = await runSnapshotGate('reset')
-  if (!snapshotOk) {
-    process.exit(1)
+  if (platform() !== 'darwin') {
+    const snapshotOk = await runSnapshotGate('reset')
+    if (!snapshotOk) {
+      process.exit(1)
+    }
   }
 
   console.log('\nRemoving the Navis Bridge (requires admin privileges)...')
-  await uninstallBridge()
+  await uninstallBridge({ removeTrustedCerts: true, userHome: homedir() })
 
   console.log('✅ Bridge removed.')
   console.log('\nStopping Navis daemon to halt mDNS advertising...')
@@ -637,10 +952,26 @@ export async function upCommand(options = {}) {
   try {
     console.log('Starting Navis daemon...')
 
+    if (options.foreground) {
+      const daemonPath = resolveDaemonEntrypoint()
+      const env = { ...process.env }
+      if (options.port) {
+        env.NAVIS_PORT = options.port
+      }
+      const daemon = spawn(process.execPath, [daemonPath], {
+        stdio: 'inherit',
+        env,
+      })
+      await new Promise((resolve) => {
+        daemon.on('exit', () => resolve())
+        daemon.on('error', () => resolve())
+      })
+      return
+    }
+
     // Check if daemon is already running
-    const daemonProcess = await findDaemonProcess()
-    if (daemonProcess) {
-      console.log('Navis daemon is already running (PID:', daemonProcess.pid, ')')
+    if (await isDaemonReachable()) {
+      console.log('Navis daemon is already running (reachable at https://127.0.0.1:47621)')
       return
     }
 
@@ -657,6 +988,7 @@ export async function upCommand(options = {}) {
     const logsDir = path.join(homedir(), '.navis', 'logs')
     const outLogPath = path.join(logsDir, 'daemon.out.log')
     const errLogPath = path.join(logsDir, 'daemon.err.log')
+    const logStart = Date.now()
 
     let stdio = 'ignore'
     try {
@@ -674,24 +1006,23 @@ export async function upCommand(options = {}) {
       env,
     })
 
+    let spawnExit = null
+
     // Handle errors
     daemon.on('error', (error) => {
       console.error('Failed to spawn daemon:', error.message)
       process.exit(1)
     })
 
+    daemon.on('exit', (code, signal) => {
+      spawnExit = { code, signal }
+    })
+
     // Detach from parent process
     daemon.unref()
 
-    // Give it a moment to start
-    await new Promise(resolve => setTimeout(resolve, 3000))
-
-    // Verify it started successfully
-    const startedProcess = await findDaemonProcess()
-    if (startedProcess) {
+    const announceReady = async () => {
       console.log('✅ Navis daemon started successfully')
-
-      // Check if daemon is responding on the canonical origin
       try {
         const response = await fetchNavis(NAVIS_PATHS.status)
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -700,21 +1031,57 @@ export async function upCommand(options = {}) {
         if (options.open !== false) {
           await openUrl(`${CANONICAL_ORIGIN}${NAVIS_PATHS.welcome}`)
         }
-        return
+        return true
       } catch {
-        console.log('\n⚠️  Daemon started but is not reachable at the canonical origin')
+        console.log('\n⚠️  Daemon started but canonical origin is not reachable')
         console.log(`   Expected: ${CANONICAL_ORIGIN}`)
         console.log('   Run: navisai doctor')
-        if (existsSync(outLogPath) || existsSync(errLogPath)) {
-          console.log(`   Logs: ${outLogPath}`)
-          console.log(`         ${errLogPath}`)
-        }
+        return false
       }
+    }
+
+    const ready = await waitForDaemonReady()
+    if (ready) {
+      await announceReady()
+      return
+    }
+
+    if (spawnExit) {
+      console.log(`❌ Daemon exited early (code: ${spawnExit.code ?? 'unknown'}, signal: ${spawnExit.signal ?? 'none'})`)
     } else {
-      console.log('❌ Failed to start daemon')
-      if (existsSync(outLogPath) || existsSync(errLogPath)) {
-        console.log(`   Logs: ${outLogPath}`)
-        console.log(`         ${errLogPath}`)
+      const daemonProcess = await findDaemonProcess()
+      if (daemonProcess) {
+        console.log('⏳ Daemon process detected; waiting for API to become ready...')
+        const extendedReady = await waitForDaemonReady({ timeoutMs: 120000, intervalMs: 1000 })
+        if (extendedReady) {
+          await announceReady()
+          return
+        }
+        console.log('⚠️  Daemon process detected but API is not responding')
+        console.log('   PID:', daemonProcess.pid)
+        console.log('   Command:', daemonProcess.cmd)
+      } else {
+        console.log('❌ Failed to start daemon')
+      }
+    }
+    if (existsSync(outLogPath) || existsSync(errLogPath)) {
+      console.log(`   Logs: ${outLogPath}`)
+      console.log(`         ${errLogPath}`)
+      const updated = await hasRecentLogOutput([outLogPath, errLogPath], logStart)
+      if (!updated) {
+        console.log('   No new daemon log output captured during this start attempt.')
+      }
+    }
+
+    const bindProbe = await probeLoopbackBind(options.port ?? 47621)
+    if (!bindProbe.ok) {
+      console.log(`   Loopback bind check failed for 127.0.0.1:${options.port ?? 47621}`)
+      console.log(`   Reason: ${bindProbe.error?.message ?? 'unknown error'}`)
+      if (bindProbe.error?.code === 'EADDRINUSE') {
+        console.log('   Another process is already using this port. Stop it or pass --port to navisai up.')
+      }
+      if (bindProbe.error?.code === 'EPERM') {
+        console.log('   macOS denied binding this port. Check local security tools or policies blocking node from listening on 127.0.0.1.')
       }
     }
   } catch (error) {
@@ -756,15 +1123,20 @@ export async function downCommand() {
 export async function statusCommand() {
   try {
     const daemonProcess = await findDaemonProcess()
+    const reachable = await isDaemonReachable()
 
-    if (daemonProcess) {
+    if (daemonProcess || reachable) {
       console.log('✅ Navis daemon is running')
-      console.log('   PID:', daemonProcess.pid)
-      console.log('   Command:', daemonProcess.cmd)
+      if (daemonProcess) {
+        console.log('   PID:', daemonProcess.pid)
+        console.log('   Command:', daemonProcess.cmd)
+      } else {
+        console.log('   PID: unknown (process inspection unavailable)')
+      }
 
       // Try to get status from API
       try {
-        const response = await fetchNavis(NAVIS_PATHS.status)
+        const response = await fetchNavis(NAVIS_PATHS.status).catch(() => fetchDaemonDirect(NAVIS_PATHS.status))
         if (response.ok) {
           const status = await response.json()
           console.log('\nDaemon Status:')
@@ -790,11 +1162,30 @@ async function checkLaunchdService(label) {
 
   try {
     const { stdout } = await execAsync(`launchctl print system/${label} 2>/dev/null || true`, { encoding: 'utf8' })
-    if (!stdout.trim()) return { supported: true, loaded: false }
-    const state = stdout.match(/\\bstate = (\\w+)/)?.[1] ?? null
-    const pid = stdout.match(/\\bpid = (\\d+)/)?.[1] ?? null
-    const lastExitCode = stdout.match(/\\blast exit code = (\\d+)/)?.[1] ?? null
-    const mayBePermissionLimited = !stdout.includes('state =') && !stdout.includes('pid =')
+    const trimmed = stdout.trim()
+    if (!trimmed) return { supported: true, loaded: false }
+    if (/bad request/i.test(trimmed) || /could not find service/i.test(trimmed)) {
+      return { supported: true, loaded: false }
+    }
+    let state = trimmed.match(/\\bstate = (\\w+)/)?.[1] ?? null
+    let pid = trimmed.match(/\\bpid = (\\d+)/)?.[1] ?? null
+    const lastExitCode = trimmed.match(/\\blast exit code = (\\d+)/)?.[1] ?? null
+    if (!state && trimmed.includes('state = running')) state = 'running'
+    const mayBePermissionLimited = !trimmed.includes('state =') && !trimmed.includes('pid =')
+
+    if (!pid) {
+      try {
+        const { stdout: listOutput } = await execAsync('launchctl list 2>/dev/null || true', { encoding: 'utf8' })
+        const line = listOutput.split('\\n').find((row) => row.trim().endsWith(label))
+        if (line) {
+          const [listPid] = line.trim().split(/\\s+/)
+          if (listPid && listPid !== '-') pid = listPid
+        }
+      } catch {
+        // Ignore fallback errors.
+      }
+    }
+
     return { supported: true, loaded: true, state, pid, lastExitCode, mayBePermissionLimited }
   } catch (error) {
     return { supported: true, loaded: null, error: error.message }
@@ -830,6 +1221,15 @@ async function readAliasIps() {
     return { success: true, aliases: [...new Set(aliases)] }
   } catch (error) {
     return { success: false, error: error.message }
+  }
+}
+
+async function checkSudoAvailable() {
+  try {
+    await execWithTimeout('sudo -n -v 2>/dev/null', { timeoutMs: 3000 })
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -914,6 +1314,34 @@ export async function doctorCommand() {
       console.log(`   - ${check.name}: ${status}${detail ? ` (${detail})` : ''}`)
     })
     console.log('   Resolve system DNS/mDNS health issues before running setup.')
+    const dnsSdFailure = preflight.checks.find(
+      (check) => check.name === 'dns-sd query' && !check.ok
+    )
+    if (dnsSdFailure?.error) {
+      if (dnsSdFailure.error.includes('Service Not Running') || dnsSdFailure.error.includes('Alarm clock')) {
+        console.log('   mDNSResponder appears unavailable; run non-mutative diagnostics first:')
+        console.log('   - dns-sd -Q _services._dns-sd._udp local')
+        console.log('   - dns-sd -B _services._dns-sd._udp local')
+        console.log('   - dscacheutil -q host -a name apple.com')
+        console.log('   - dig @224.0.0.251 -p 5353 _services._dns-sd._udp.local')
+        console.log('   Mutative recovery steps require a fresh snapshot + explicit opt-in:')
+        console.log('   - sudo launchctl kickstart -k system/com.apple.mDNSResponder')
+        console.log('   - sudo launchctl kickstart -k system/com.apple.mDNSResponderHelper')
+        console.log('   - sudo killall -INFO mDNSResponder (enables extra logging)')
+        console.log('   - dns-sd -R $(hostname) .local _device-info._tcp local 0')
+        const mdnsState = await checkLaunchdService('com.apple.mDNSResponder.reloaded')
+        const helperState = await checkLaunchdService('com.apple.mDNSResponderHelper.reloaded')
+        if (mdnsState.loaded || helperState.loaded) {
+          console.log('   Launchd state:')
+          if (mdnsState.loaded) {
+            console.log(`   - mDNSResponder.reloaded: state=${mdnsState.state ?? 'unknown'} pid=${mdnsState.pid ?? 'unknown'}`)
+          }
+          if (helperState.loaded) {
+            console.log(`   - mDNSResponderHelper.reloaded: state=${helperState.state ?? 'unknown'} pid=${helperState.pid ?? 'unknown'}`)
+          }
+        }
+      }
+    }
     if (preflight.checks.some((check) => check.name === 'OCLP detected' && check.detected)) {
       console.log('   OCLP detected: enable extra safeguards and verify snapshot gating before proceeding.')
     }
@@ -955,6 +1383,15 @@ export async function doctorCommand() {
     }
   }
 
+  const bindProbe = await probeLoopbackBind(47621)
+  if (!bindProbe.ok) {
+    console.log('⚠️  Loopback bind check failed for 127.0.0.1:47621')
+    console.log(`   Reason: ${bindProbe.error?.message ?? 'unknown error'}`)
+    allGood = false
+  } else {
+    console.log('✅ Loopback bind check succeeded for 127.0.0.1:47621')
+  }
+
   if (!allGood && !daemonProcess) {
     console.log('\n⛔ Doctor stopped early due to failed safety gates.')
     console.log('   Resolve the safety failures above, then re-run: navisai doctor')
@@ -974,7 +1411,11 @@ export async function doctorCommand() {
     if (launchd.supported && launchd.loaded) {
       const isRunning = launchd.state === 'running' || Boolean(launchd.pid)
       if (isRunning) {
-        console.log(`✅ Bridge service running via launchd (PID: ${launchd.pid})`)
+        if (launchd.pid) {
+          console.log(`✅ Bridge service running via launchd (PID: ${launchd.pid})`)
+        } else {
+          console.log('✅ Bridge service running via launchd')
+        }
       } else {
         console.log('⚠️  Bridge service installed but not confirmed running via launchd')
         if (launchd.state) console.log(`   state: ${launchd.state}`)
@@ -1073,7 +1514,7 @@ export async function doctorCommand() {
   }
 
   // Directly query mDNS to catch "router blocks multicast between clients" issues (Refs: navisai-jsh)
-  const mdnsQuery = await queryMdnsARecord('navis.local', 3000)
+  const mdnsQuery = await queryMdnsARecord('navis.local', 6000)
   if (mdnsQuery.success) {
     console.log(`✅ mDNS query: navis.local A -> ${mdnsQuery.address}`)
   } else {
@@ -1081,14 +1522,14 @@ export async function doctorCommand() {
     console.log('   💡 If IP access works but navis.local does not on a phone, your LAN may block Bonjour/mDNS between clients.')
   }
 
-  const mdnsQueryV6 = await queryMdnsAAAARecord('navis.local', 3000)
+  const mdnsQueryV6 = await queryMdnsAAAARecord('navis.local', 6000)
   if (mdnsQueryV6.success) {
     console.log(`✅ mDNS query: navis.local AAAA -> ${mdnsQueryV6.address}`)
   } else {
     console.log(`⚠️  mDNS AAAA query: ${mdnsQueryV6.error}`)
   }
 
-  const navisService = await browseMdnsService('_navisai._tcp', 'local', 3000)
+  const navisService = await browseMdnsService('_navisai._tcp', 'local', 6000)
   if (navisService.success && navisService.found) {
     console.log('✅ mDNS service: _navisai._tcp advertised')
   } else if (navisService.success) {
@@ -1099,32 +1540,39 @@ export async function doctorCommand() {
 
   const mdnsServiceType = '_navisai._tcp.local'
   const mdnsInstance = 'NavisAI._navisai._tcp.local'
-  const ptrResult = await queryMdnsRecord(mdnsServiceType, 'PTR', 3000)
+  const ptrResult = await queryMdnsRecord(mdnsServiceType, 'PTR', 6000)
   if (ptrResult.success) {
-    const target = ptrResult.line.match(/\bPTR\s+(\S+)/)?.[1]?.replace(/\.$/, '')
-    console.log(`✅ mDNS PTR: ${mdnsServiceType} -> ${target || 'unknown'}`)
+    const target = parsePtrTarget(ptrResult.line)
+    if (!target) {
+      console.log(`⚠️  mDNS PTR: no record found for ${mdnsServiceType}`)
+      allGood = false
+    } else {
+      console.log(`✅ mDNS PTR: ${mdnsServiceType} -> ${target}`)
+    }
     const instanceName = target || mdnsInstance
 
-    const srvResult = await queryMdnsRecord(instanceName, 'SRV', 3000)
+    const srvResult = await queryMdnsRecord(instanceName, 'SRV', 6000)
     if (srvResult.success) {
-      const srvTarget = extractMdnsToken(srvResult.line, ' SRV ')
-      const hasPort = srvResult.line.match(/\b443\b/)
-      if (srvTarget && hasPort) {
-        console.log(`✅ mDNS SRV: ${instanceName} -> ${srvTarget}:443`)
+      const srvRecord = parseSrvRecord(srvResult.line)
+      if (srvRecord && srvRecord.port === 443) {
+        console.log(`✅ mDNS SRV: ${instanceName} -> ${srvRecord.target}:443`)
+        if (mdnsIp && srvRecord.target !== 'navis.local') {
+          console.log(`⚠️  mDNS SRV target mismatch: expected navis.local, got ${srvRecord.target}`)
+          allGood = false
+        }
       } else {
         console.log(`⚠️  mDNS SRV: unexpected data (${srvResult.line})`)
-      }
-    if (srvTarget && mdnsIp && srvTarget !== 'navis.local') {
-        console.log(`⚠️  mDNS SRV target mismatch: expected navis.local, got ${srvTarget}`)
-        allGood = false
       }
     } else {
       console.log(`⚠️  mDNS SRV: ${srvResult.error}`)
     }
 
-    const txtResult = await queryMdnsRecord(instanceName, 'TXT', 3000)
+    const txtResult = await queryMdnsRecord(instanceName, 'TXT', 6000)
     if (txtResult.success) {
-      const txtLine = txtResult.line
+      if (txtResult.line.includes('No Such Record')) {
+        console.log(`⚠️  mDNS TXT: no record found for ${instanceName}`)
+      } else {
+      const txtLine = parseTxtPayload(txtResult.line)
       const hasTls = txtLine.includes('tls=1')
       const hasOrigin = txtLine.includes('origin=https://navis.local')
       const hasVersion = txtLine.includes('version=1')
@@ -1133,14 +1581,15 @@ export async function doctorCommand() {
       } else {
         console.log(`⚠️  mDNS TXT: unexpected data (${txtLine})`)
       }
+      }
     } else {
       console.log(`⚠️  mDNS TXT: ${txtResult.error}`)
     }
 
     if (mdnsIp && instanceName) {
-      const srvTarget = extractMdnsToken(srvResult.line, ' SRV ')
-      if (srvTarget && srvTarget === 'navis.local') {
-        const srvA = await queryMdnsARecord(srvTarget)
+      const srvRecord = parseSrvRecord(srvResult.line)
+      if (srvRecord && srvRecord.target === 'navis.local') {
+        const srvA = await queryMdnsARecord(srvRecord.target)
         if (srvA.success && srvA.address !== mdnsIp) {
           console.log(`⚠️  mDNS mismatch: SRV target A ${srvA.address} != navis.local A ${mdnsIp}`)
           allGood = false
@@ -1183,7 +1632,7 @@ export async function doctorCommand() {
 
   // Test direct daemon connectivity
   try {
-    const certPem = await fs.readFile(CERT_PATH, 'utf8').catch(() => null)
+    const certPem = await fs.readFile(CA_CERT_PATH, 'utf8').catch(() => null)
     const dispatcher = new UndiciAgent({
       connect: certPem ? { ca: certPem } : { rejectUnauthorized: false },
     })
@@ -1199,20 +1648,71 @@ export async function doctorCommand() {
     allGood = false
   }
 
-  const tlsStatus = await checkTlsCertificate()
-  if (tlsStatus.exists) {
+  const caStatus = await checkCaCertificate()
+  const leafStatus = await checkLeafCertificate()
+  const chainStatus = await checkTlsChainServed()
+
+  if (caStatus.exists) {
     const now = new Date()
-    const expiresInMs = tlsStatus.validTo - now
+    const expiresInMs = caStatus.validTo - now
     const expiresInDays = Math.max(0, Math.ceil(expiresInMs / (1000 * 60 * 60 * 24)))
-    const validityMsg = tlsStatus.isExpired ? ' (expired)' : ` (expires in ~${expiresInDays} day${expiresInDays === 1 ? '' : 's'})`
+    const validityMsg = caStatus.isExpired ? ' (expired)' : ` (expires in ~${expiresInDays} day${expiresInDays === 1 ? '' : 's'})`
     console.log(
-      `✅ TLS cert: ${tlsStatus.path} (valid from ${tlsStatus.validFrom.toISOString()} to ${tlsStatus.validTo.toISOString()})${validityMsg}`
+      `✅ TLS CA cert: ${caStatus.path} (valid from ${caStatus.validFrom.toISOString()} to ${caStatus.validTo.toISOString()})${validityMsg}`
     )
-    if (tlsStatus.isExpired) {
+    if (!caStatus.isCa) {
+      console.log('⚠️  TLS CA cert missing CA:TRUE basic constraints')
+      allGood = false
+    }
+    if (caStatus.trustSettingsOk === false) {
+      console.log('⚠️  TLS CA cert not trusted in OS trust settings')
+      allGood = false
+    } else if (caStatus.trustSettingsOk === null) {
+      console.log('ℹ️  TLS CA trust settings check not supported on this OS')
+    }
+    if (caStatus.isExpired) {
       allGood = false
     }
   } else {
-    console.log(`⚠️  TLS certificate missing or unreadable: ${tlsStatus.error}`)
+    console.log(`⚠️  TLS CA certificate missing or unreadable: ${caStatus.error}`)
+    allGood = false
+  }
+
+  if (leafStatus.exists) {
+    const now = new Date()
+    const expiresInMs = leafStatus.validTo - now
+    const expiresInDays = Math.max(0, Math.ceil(expiresInMs / (1000 * 60 * 60 * 24)))
+    const validityMsg = leafStatus.isExpired ? ' (expired)' : ` (expires in ~${expiresInDays} day${expiresInDays === 1 ? '' : 's'})`
+    console.log(
+      `✅ TLS leaf cert: ${leafStatus.path} (valid from ${leafStatus.validFrom.toISOString()} to ${leafStatus.validTo.toISOString()})${validityMsg}`
+    )
+    if (!leafStatus.hasSan) {
+      console.log('⚠️  TLS leaf missing DNS SAN navis.local')
+      allGood = false
+    }
+    if (!leafStatus.hasEku) {
+      console.log('⚠️  TLS leaf missing EKU serverAuth')
+      allGood = false
+    }
+    if (leafStatus.issuerCN && caStatus.subjectCN && leafStatus.issuerCN !== caStatus.subjectCN) {
+      console.log(`⚠️  TLS leaf issuer CN (${leafStatus.issuerCN}) does not match CA CN (${caStatus.subjectCN})`)
+      allGood = false
+    }
+    if (leafStatus.isExpired) {
+      allGood = false
+    }
+  } else {
+    console.log(`⚠️  TLS leaf certificate missing or unreadable: ${leafStatus.error}`)
+    allGood = false
+  }
+
+  if (chainStatus.ok) {
+    console.log(`✅ TLS chain served (certs: ${chainStatus.certCount})`)
+  } else if (chainStatus.error) {
+    console.log(`⚠️  TLS chain check failed: ${chainStatus.error}`)
+    allGood = false
+  } else {
+    console.log('⚠️  TLS chain not trusted with local CA')
     allGood = false
   }
 
@@ -1290,7 +1790,15 @@ export async function doctorCommand() {
     } else {
       try {
         require.resolve('better-sqlite3', { paths: [repoRoot] })
-        console.log('✅ Native SQLite module detected (better-sqlite3)')
+        try {
+          require('better-sqlite3')
+          console.log('✅ Native SQLite module loaded (better-sqlite3)')
+        } catch (error) {
+          console.log('⚠️  Native SQLite module present but failed to load (optional)')
+          if (error?.message) {
+            console.log(`   ${error.message.split('\n')[0]}`)
+          }
+        }
       } catch {
         console.log('⚠️  Native SQLite module not found (optional)')
         console.log('   Daemon will run without persistent storage')
@@ -1408,46 +1916,61 @@ export async function doctorCommand() {
       console.log('✅ Bridge: launchd service installed (com.navisai.bridge)')
 
       // Test packet forwarding rules
-      try {
-        // Check NAT rules in correct anchor
-        const { stdout: natRules } = await execWithTimeout('sudo -n pfctl -a navisai/proxy -s nat 2>/dev/null || echo "no nat rules"')
-        if (natRules.includes('rdr') && natRules.includes('443') && natRules.includes('127.0.0.1')) {
-          console.log('✅ Packet forwarding: NAT rules configured for 443 → 8443 (navisai/proxy)')
-        } else {
-          console.log('⚠️  Packet forwarding: NAT rules not found in navisai/proxy anchor')
-          console.log('   Run: navisai setup to install packet forwarding')
-          allGood = false
-        }
-
-        // Check filter rules
-        const { stdout: filterRules } = await execWithTimeout('sudo -n pfctl -a navisai/filter -s rules 2>/dev/null || echo "no filter rules"')
-        if (filterRules.includes('keep state')) {
-          console.log('✅ Packet forwarding: Filter rules configured (navisai/filter)')
-        } else {
-          console.log('⚠️  Packet forwarding: Filter rules not found in navisai/filter anchor')
-          allGood = false
-        }
-
-        // Check if pf is enabled
-        const { stdout: pfEnabled } = await execWithTimeout('sudo -n pfctl -s info 2>/dev/null | grep "Status: Enabled" || echo "disabled"')
-        if (pfEnabled.includes('Enabled')) {
-          console.log('✅ Packet filtering: pf is enabled')
-        } else {
-          console.log('⚠️  Packet filtering: pf is not enabled')
-          allGood = false
-        }
-      } catch (error) {
+      const sudoAvailable = await checkSudoAvailable()
+      if (!sudoAvailable) {
         console.log('⚠️  Packet forwarding: Cannot check pfctl rules without sudo')
+        console.log('   ℹ️  Bridge appears active; pfctl verification needs sudo to confirm rules.')
         console.log('   Try: sudo navisai doctor')
+      } else {
+        try {
+          // Check NAT rules in correct anchor
+          const { stdout: natRules } = await execWithTimeout('sudo -n pfctl -a navisai/proxy -s nat 2>/dev/null')
+          if (natRules.includes('rdr') && natRules.includes('443') && natRules.includes('127.0.0.1')) {
+            console.log('✅ Packet forwarding: NAT rules configured for 443 → 8443 (navisai/proxy)')
+          } else {
+            console.log('⚠️  Packet forwarding: NAT rules not found in navisai/proxy anchor')
+            console.log('   Run: navisai setup to install packet forwarding')
+            allGood = false
+          }
+
+          // Check filter rules
+          const { stdout: filterRules } = await execWithTimeout('sudo -n pfctl -a navisai/filter -s rules 2>/dev/null')
+          if (filterRules.includes('keep state')) {
+            console.log('✅ Packet forwarding: Filter rules configured (navisai/filter)')
+          } else {
+            console.log('⚠️  Packet forwarding: Filter rules not found in navisai/filter anchor')
+            allGood = false
+          }
+
+          // Check if pf is enabled
+          const { stdout: pfEnabled } = await execWithTimeout('sudo -n pfctl -s info 2>/dev/null')
+          if (pfEnabled.includes('Status: Enabled')) {
+            console.log('✅ Packet filtering: pf is enabled')
+          } else {
+            console.log('⚠️  Packet filtering: pf is not enabled')
+            allGood = false
+          }
+        } catch (error) {
+          console.log('⚠️  Packet forwarding: Cannot check pfctl rules without sudo')
+          console.log('   Try: sudo navisai doctor')
+        }
       }
 
       // Test if proxy is listening
-      try {
-        await execWithTimeout('lsof -i :8443 -sTCP:LISTEN -n -P | grep -q "LISTEN"')
-        console.log('✅ Transparent proxy: Listening on port 8443')
-      } catch (error) {
-        console.log('⚠️  Transparent proxy: Not listening on port 8443')
-        allGood = false
+      if (!sudoAvailable) {
+        console.log('⚠️  Transparent proxy: Cannot check without sudo')
+      } else {
+        try {
+          const { stdout } = await execWithTimeout('sudo -n lsof -i :8443 -sTCP:LISTEN -n -P 2>/dev/null')
+          if (stdout.includes('LISTEN')) {
+            console.log('✅ Transparent proxy: Listening on port 8443')
+          } else {
+            console.log('⚠️  Transparent proxy: Not listening on port 8443')
+            allGood = false
+          }
+        } catch (error) {
+          console.log('⚠️  Transparent proxy: Cannot check without sudo')
+        }
       }
 
     } else if (os === 'linux') {
@@ -1529,6 +2052,7 @@ export async function cleanupCommand(options = {}) {
   if (bridgeOnly) {
     console.log('Mode: bridge-only (non-destructive)')
     console.log('- Removes OS bridge service (443 entrypoint)')
+    console.log('- Removes trusted navis.local certificates (with notice)')
     console.log('- Optionally removes TLS certs from ~/.navis/certs')
     console.log('- Keeps local state (DB, paired devices, preferences)\n')
     await resetCommand()
@@ -1537,6 +2061,7 @@ export async function cleanupCommand(options = {}) {
 
   console.log('Mode: ALL (destructive factory reset)')
   console.log('- Removes OS bridge service (443 entrypoint)')
+  console.log('- Removes trusted navis.local certificates (with notice)')
   console.log('- Optionally removes TLS certs from ~/.navis/certs')
   console.log('- Deletes local state under ~/.navis (including db.sqlite)\n')
 
@@ -1548,7 +2073,7 @@ export async function cleanupCommand(options = {}) {
 
   const phrase = 'DELETE ~/.navis'
   const ok = await confirmTyped(
-    `This will permanently delete local Navis state at ${path.join(homedir(), '.navis')}.\nThis cannot be undone.`,
+    `This will permanently delete local Navis state at ${path.join(homedir(), '.navis')} and remove trusted navis.local certificates.\nThis cannot be undone.`,
     phrase
   )
   if (!ok) {
@@ -1557,8 +2082,14 @@ export async function cleanupCommand(options = {}) {
   }
 
   console.log('\nRemoving the Navis Bridge (requires admin privileges)...')
-  await uninstallBridge()
-  console.log('✅ Bridge removed.')
+  try {
+    await uninstallBridge({ removeTrustedCerts: true, userHome: homedir() })
+    console.log('✅ Bridge removed.')
+  } catch (error) {
+    console.error('❌ Bridge removal failed:', error.message)
+    console.error('   Ensure the macOS admin approval sheet is visible and retry.')
+    process.exit(1)
+  }
 
   const removeCerts = await confirm('Also remove TLS certificates from ~/.navis/certs?')
   if (removeCerts) {

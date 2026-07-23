@@ -13,6 +13,7 @@ import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import fastifyStatic from '@fastify/static'
 import { NAVIS_PATHS } from '@navisai/api-contracts'
@@ -64,6 +65,16 @@ import discovery from '@navisai/discovery'
 import { detectorRegistry } from '@navisai/discovery/detectors/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+async function probeBind(host, port) {
+  return new Promise((resolve) => {
+    const server = createServer()
+    server.once('error', (error) => resolve({ ok: false, error }))
+    server.listen(port, host, () => {
+      server.close(() => resolve({ ok: true }))
+    })
+  })
+}
 
 export class NavisDaemon {
   constructor() {
@@ -317,6 +328,24 @@ export class NavisDaemon {
       console.log(`📊 Status: https://navis.local/status`)
     } catch (error) {
       console.error('\n❌ Failed to start daemon:', error.message)
+      console.error(`   bind target: ${host}:${port}`)
+      if (typeof process.getuid === 'function') {
+        console.error(`   uid: ${process.getuid()}`)
+      }
+      if (error?.code === 'EPERM') {
+        console.error('   macOS denied binding the loopback port; check local security tools or policies blocking listeners.')
+      }
+      if (error?.code || error?.syscall) {
+        console.error(`   error details: code=${error.code ?? 'n/a'} syscall=${error.syscall ?? 'n/a'} errno=${error.errno ?? 'n/a'} address=${error.address ?? 'n/a'} port=${error.port ?? 'n/a'}`)
+      }
+      if (host === '127.0.0.1' && (error?.code === 'EPERM' || error?.code === 'EACCES')) {
+        const probe = await probeBind(host, port)
+        if (probe.ok) {
+          console.error('   probe: basic bind succeeded; Fastify listen failed (possible sandbox/security filter).')
+        } else {
+          console.error(`   probe: basic bind failed (${probe.error?.code ?? probe.error?.message ?? 'unknown'})`)
+        }
+      }
       throw error
     }
   }
@@ -456,7 +485,7 @@ export class NavisDaemon {
       })
 
       this.fastify.setNotFoundHandler((request, reply) => {
-        if (request.method === 'GET') {
+        if (request.method === 'GET' || request.method === 'HEAD') {
           if (request.url === NAVIS_PATHS.welcome) {
             this.fastify.log.info(
               {
@@ -531,7 +560,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
 
   async getCertHandler(request, reply) {
     try {
-      const cert = await readFile(this.sslManager.certFile)
+      const cert = await this.sslManager.getCACertificate()
       reply.type('application/x-x509-ca-cert')
       return cert
     } catch {
@@ -645,11 +674,7 @@ pnpm --filter @navisai/daemon dev</code></pre>
   async scanHandler(request, reply) {
     // Refs: navisai-4oi (discovery endpoint implementation)
     const { path, options = {} } = request.body
-
-    if (!path) {
-      reply.code(400)
-      return { error: 'Path is required' }
-    }
+    const scanPath = typeof path === 'string' && path.trim() ? path.trim() : homedir()
 
     try {
       // Use discovery engine to scan for projects
@@ -660,10 +685,10 @@ pnpm --filter @navisai/daemon dev</code></pre>
         ...options
       }
 
-      const projects = await discovery.scan(path, scanOptions)
+      const projects = await discovery.scan(scanPath, scanOptions)
 
       return {
-        scannedPath: path,
+        scannedPath: scanPath,
         count: projects.length,
         projects: projects.map(p => ({
           id: p.id || Buffer.from(p.path).toString('base64'),

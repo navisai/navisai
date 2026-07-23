@@ -197,7 +197,7 @@ POST  /approvals/:id/approve
 POST  /approvals/:id/reject
 POST  /pairing/request
 POST  /pairing/start
-GET   /certs/navis.local.crt
+GET   /certs/navis.local-ca.crt
 ```
 
 ## 4.2 WebSocket Events

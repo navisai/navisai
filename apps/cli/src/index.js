@@ -27,12 +27,14 @@ program
   .description('One-time setup for clean https://navis.local LAN access')
   .option('--skipUI', 'Skip the macOS setup app and use command-line setup')
   .option('--autoConfirm', 'Automatically confirm all prompts')
+  .option('--freshAuth', 'Require a fresh macOS admin auth sheet for setup (testing)')
   .action(setupCommand)
 
 program
   .command('up')
   .description('Start the Navis daemon')
   .option('-p, --port <number>', 'Port to run the daemon on (default: 47621)')
+  .option('--foreground', 'Run daemon in foreground (debug)')
   .option('--no-open', 'Do not open the onboarding URL in the browser')
   .action(upCommand)
 

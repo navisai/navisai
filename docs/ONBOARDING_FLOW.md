@@ -45,9 +45,16 @@ Snapshot policy:
 1. Install **packet forwarding rules** that selectively route navis.local traffic (443 → daemon port 47621).
 2. Enable mDNS/Bonjour so `navis.local` resolves on the LAN to the host machine’s LAN IP.
 3. Generate/refresh local certificates for `navis.local` (used by the daemon).
-4. Provide guided steps for mobile trust (iOS requires an explicit trust action for local certificates).
+4. Require desktop certificate trust before setup completes and mobile trust before pairing:
+   - Desktop: guided Keychain trust walkthrough (must complete before setup finishes).
+   - Mobile: guided trust steps (iOS requires explicit trust before pairing).
 
 Setup is never silent and is fully reversible.
+
+Scope rule:
+- All recommendations must stay within documented behavior in `docs/`.
+- If a suggestion is outside documented scope, explicitly label it and explain why it is being raised.
+- Never recommend changes to user development tools or services to resolve Navis conflicts.
 
 The `navisai setup` command launches the platform helper (`apps/setup-app` / `@navisai/setup-app`) so installing packet forwarding rules (443 → 47621) and enabling mDNS is bundled with a friendly approval dialog before the canonical `https://navis.local` origin becomes available.
 
@@ -81,7 +88,11 @@ Optionally offer to open the browser (opt-in or interactive prompt), rather than
 ### 3.1 Welcome Screen
 - “Navis is running locally”
 - Explanation of local-first model
-- If needed, show a guided mobile certificate trust step and provide a direct download link (e.g. `GET /certs/navis.local.crt`).
+- If needed, show a guided certificate trust step (desktop + mobile) and provide a direct download link (e.g. `GET /certs/navis.local-ca.crt`).
+- Validate mobile LAN reachability before pairing:
+  - Phone on same Wi‑Fi (cellular off).
+  - `https://navis.local/welcome` loads without DNS errors.
+  - If it fails, prompt to check router client isolation / mDNS filtering.
 
 ### 3.2 How Navis Works
 - Visual overview:

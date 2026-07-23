@@ -27,6 +27,10 @@ export class WebSocketManager {
       path: '/ws'
     })
 
+    this.wss.on('error', (error) => {
+      console.error('WebSocket server error:', error.message)
+    })
+
     this.wss.on('connection', (ws, request) => {
       this.handleConnection(ws, request).catch(error => {
         console.error('WebSocket auth error:', error)

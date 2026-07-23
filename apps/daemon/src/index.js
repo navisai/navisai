@@ -8,6 +8,16 @@ import daemon from '../daemon.js'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception in daemon:', error?.stack ?? error)
+  process.exit(1)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection in daemon:', reason)
+  process.exitCode = 1
+})
+
 // Start daemon if run directly
 const selfPath = fileURLToPath(import.meta.url)
 const argvPath = process.argv[1] ? path.resolve(process.argv[1]) : null

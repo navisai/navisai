@@ -1,4 +1,4 @@
-import { exec as execCb } from 'node:child_process'
+import { exec as execCb, execFile as execFileCb, execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -11,7 +11,17 @@ import { readSnapshotState, recordLatestSnapshot, isSnapshotFresh, navisSnapshot
 import { logEvent } from './logging.js'
 
 const execAsync = promisify(execCb)
+const execFileAsync = promisify(execFileCb)
 const require = createRequire(import.meta.url)
+const FRESH_AUTH_REQUIRED = process.env.NAVIS_SETUP_REQUIRE_FRESH_AUTH === '1'
+const FRESH_AUTH_MIN_MS = Number.parseInt(process.env.NAVIS_SETUP_FRESH_AUTH_MIN_MS ?? '1500', 10)
+const ADMIN_SHEET_TIMEOUT_MS = process.env.NAVIS_SETUP_ADMIN_TIMEOUT_MS
+  ? Number.parseInt(process.env.NAVIS_SETUP_ADMIN_TIMEOUT_MS, 10)
+  : null
+const UI_PREFLIGHT_TIMEOUT_MS = Number.parseInt(process.env.NAVIS_SETUP_UI_TIMEOUT_MS ?? '15000', 10)
+const VERIFY_SHEETS = process.env.NAVIS_SETUP_VERIFY_SHEETS === '1'
+let freshAuthSatisfied = false
+let adminCacheNoticeShown = false
 
 export function resolveDaemonBridgeEntrypoint() {
   if (typeof require.resolve === 'function') {
@@ -47,17 +57,40 @@ export async function runMacOSAdminShell(shellCommand) {
   await writeFile(tempScript, shellCommand, 'utf8')
 
   try {
-    const script = `do shell script "chmod +x '${tempScript}' && '${tempScript}'" with administrator privileges`
+    await ensureUiAvailable()
+    await requireFreshAdminAuth()
+    const prompt = 'Navis needs administrator approval to continue.'
+    const script =
+      `do shell script "chmod +x '${tempScript}' && '${tempScript}'"` +
+      ` with administrator privileges with prompt "${escapeAppleScriptText(prompt)}"`
     await logEvent('info', 'Running macOS admin shell')
-    const result = await execAsync(`osascript -e "${escapeAppleScriptShell(script)}"`)
+    const start = Date.now()
+    const execOptions = ADMIN_SHEET_TIMEOUT_MS ? { timeout: ADMIN_SHEET_TIMEOUT_MS } : undefined
+    const result = await execOsascript(['-e', script], execOptions)
+    const elapsedMs = Date.now() - start
+    const autoDefaultSuspected = elapsedMs < 1000
     await logEvent('info', 'macOS admin shell completed', {
       stdout: (result.stdout || '').slice(0, 2000),
-      stderr: (result.stderr || '').slice(0, 2000)
+      stderr: (result.stderr || '').slice(0, 2000),
+      elapsedMs,
+      autoDefaultSuspected
     })
+    if (autoDefaultSuspected) {
+      await logEvent('warn', 'Admin approval returned too quickly; possible auto-default', { elapsedMs })
+      await notifyCachedAdminApproval(elapsedMs)
+    }
     return result.stdout || result
   } catch (error) {
-    await logEvent('error', 'macOS admin shell failed', { error: error.message })
-    throw error
+    const timedOut = error?.killed || String(error?.message || '').includes('timeout')
+    const message = timedOut
+      ? 'Admin approval timed out. Ensure the macOS security sheet is visible and approve it, then retry.'
+      : error.message
+    await logEvent('error', 'macOS admin shell failed', {
+      error: error.message,
+      stdout: error?.stdout?.slice?.(0, 2000),
+      stderr: error?.stderr?.slice?.(0, 2000)
+    })
+    throw new Error(message)
   } finally {
     // Clean up temp script
     try {
@@ -70,6 +103,110 @@ export async function runMacOSAdminShell(shellCommand) {
 
 function escapeAppleScriptShell(command) {
   return command.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+function escapeAppleScriptText(value) {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')
+}
+
+function getConsoleUid() {
+  try {
+    const output = execSync('stat -f %u /dev/console', { encoding: 'utf8' }).trim()
+    const uid = Number.parseInt(output, 10)
+    return Number.isNaN(uid) ? null : uid
+  } catch {
+    return null
+  }
+}
+
+function getOsascriptCommand(args) {
+  const forceAsUser = process.env.NAVIS_SETUP_FORCE_ASUSER === '1'
+  if (!forceAsUser) {
+    return { command: 'osascript', args }
+  }
+
+  const uid = getConsoleUid() ?? (typeof process.getuid === 'function' ? process.getuid() : null)
+  if (uid == null) {
+    return { command: 'osascript', args }
+  }
+
+  return { command: 'launchctl', args: ['asuser', String(uid), 'osascript', ...args] }
+}
+
+async function execOsascript(args, options = {}) {
+  const { command, args: commandArgs } = getOsascriptCommand(args)
+  return execFileAsync(command, commandArgs, options)
+}
+
+async function notifyCachedAdminApproval(elapsedMs) {
+  if (adminCacheNoticeShown) return
+  adminCacheNoticeShown = true
+  const message = [
+    'macOS likely reused a recent admin approval, so the security sheet may not have appeared.',
+    'If you expected a sheet, re-run setup with fresh admin authorization.'
+  ].join('\n')
+  const script = `
+tell application "System Events" to activate
+display dialog "${escapeAppleScriptText(message)}" buttons {"OK"} default button "OK"
+`
+  try {
+    await logEvent('info', 'Notifying cached admin approval', { elapsedMs })
+    await execOsascript(['-e', script])
+  } catch (error) {
+    await logEvent('warn', 'Cached admin approval notice failed', { error: error.message })
+  }
+}
+
+async function ensureUiAvailable() {
+  if (!VERIFY_SHEETS) return
+  try {
+    const verifyScript =
+      'display dialog "Navis is about to request administrator approval." buttons {"Continue"} default button "Continue"'
+    await execOsascript(['-e', verifyScript], { timeout: UI_PREFLIGHT_TIMEOUT_MS })
+  } catch (error) {
+    await logEvent('warn', 'UI preflight dialog dismissed or unavailable', {
+      error: error.message,
+      securitySessionId: process.env.SECURITYSESSIONID ?? null
+    })
+  }
+}
+
+async function requireFreshAdminAuth() {
+  if (!FRESH_AUTH_REQUIRED || freshAuthSatisfied) return
+
+  const prompt = [
+    'Navis Setup needs administrator approval for testing.',
+    'You should see a macOS security sheet each time.'
+  ].join('\n')
+  const script = `do shell script "true" with administrator privileges with prompt "${escapeAppleScriptText(prompt)}"`
+
+  await logEvent('info', 'Requesting macOS admin authorization', {
+    freshAuth: true,
+    minMs: FRESH_AUTH_MIN_MS
+  })
+
+  const start = Date.now()
+  try {
+    await execOsascript(['-e', script], { timeout: ADMIN_SHEET_TIMEOUT_MS })
+  } catch (error) {
+    await logEvent('error', 'macOS admin authorization failed', { error: error.message })
+    throw error
+  }
+  const elapsedMs = Date.now() - start
+  await logEvent('info', 'macOS admin authorization completed', { elapsedMs, freshAuth: true })
+
+  if (Number.isFinite(FRESH_AUTH_MIN_MS) && elapsedMs < FRESH_AUTH_MIN_MS) {
+    await logEvent('warn', 'macOS admin authorization reused (cached)', {
+      elapsedMs,
+      minMs: FRESH_AUTH_MIN_MS
+    })
+    throw new Error(
+      `Admin authorization appears cached (${elapsedMs}ms). ` +
+        'For testing, wait for macOS auth cache to expire and retry setup.'
+    )
+  }
+
+  freshAuthSatisfied = true
 }
 
 export async function installMacOSBridge() {
@@ -92,8 +229,9 @@ export async function installMacOSBridge() {
   await logEvent('info', 'Bridge install log path', { installLogPath })
   const bridgeEntrypoint = resolveDaemonBridgeEntrypoint()
   const nodePath = process.execPath
+  const userHome = homedir()
 
-  const localDir = path.join(homedir(), '.navis', 'bridge')
+  const localDir = path.join(userHome, '.navis', 'bridge')
   const localPlist = path.join(localDir, 'com.navisai.bridge.plist')
   const systemPlist = '/Library/LaunchDaemons/com.navisai.bridge.plist'
   const runnerPath = '/usr/local/libexec/navisai-bridge-runner'
@@ -105,7 +243,7 @@ export async function installMacOSBridge() {
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-  <dict>
+<dict>
     <key>Label</key>
     <string>com.navisai.bridge</string>
 
@@ -117,17 +255,19 @@ export async function installMacOSBridge() {
 	      <string>--setup-approved</string>
 	    </array>
 
-    <key>EnvironmentVariables</key>
-    <dict>
-      <key>NAVIS_BRIDGE_HOST</key>
-      <string>0.0.0.0</string>
-      <key>NAVIS_BRIDGE_PORT</key>
-      <string>443</string>
-      <key>NAVIS_DAEMON_HOST</key>
-      <string>127.0.0.1</string>
-      <key>NAVIS_DAEMON_PORT</key>
-      <string>47621</string>
-    </dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>NAVIS_BRIDGE_HOST</key>
+		<string>0.0.0.0</string>
+		<key>NAVIS_BRIDGE_PORT</key>
+		<string>443</string>
+		<key>NAVIS_DAEMON_HOST</key>
+		<string>127.0.0.1</string>
+		<key>NAVIS_DAEMON_PORT</key>
+		<string>47621</string>
+		<key>NAVIS_USER_HOME</key>
+		<string>${userHome}</string>
+	</dict>
 
     <key>RunAtLoad</key>
     <true/>
@@ -288,14 +428,26 @@ fi
 
   try {
     // Make script executable and run it with admin privileges
-    const script = `do shell script "chmod +x '${tempScript}' && '${tempScript}'" with administrator privileges`
+    const prompt = 'Navis needs administrator approval to continue.'
+    const script =
+      `do shell script "chmod +x '${tempScript}' && '${tempScript}'"` +
+      ` with administrator privileges with prompt "${escapeAppleScriptText(prompt)}"`
     await logEvent('info', 'Running macOS bridge install script')
-    const result = await execAsync(`osascript -e "${escapeAppleScriptShell(script)}"`)
+    await ensureUiAvailable()
+    const start = Date.now()
+    const result = await execOsascript(['-e', script], { timeout: ADMIN_SHEET_TIMEOUT_MS })
+    const elapsedMs = Date.now() - start
+    const autoDefaultSuspected = elapsedMs < 1000
     await recordLatestSnapshot()
     await logEvent('info', 'Bridge install completed', {
       stdout: (result.stdout || '').slice(0, 2000),
-      stderr: (result.stderr || '').slice(0, 2000)
+      stderr: (result.stderr || '').slice(0, 2000),
+      elapsedMs,
+      autoDefaultSuspected
     })
+    if (autoDefaultSuspected) {
+      await logEvent('warn', 'Admin approval returned too quickly; possible auto-default', { elapsedMs })
+    }
     return result.stdout || result
   } finally {
     // Clean up temp script
@@ -314,7 +466,8 @@ fi
   }
 }
 
-export async function uninstallMacOSBridge() {
+export async function uninstallMacOSBridge(options = {}) {
+  const { removeTrustedCerts = false, userHome = homedir() } = options
   await logEvent('info', 'Uninstall macOS bridge requested')
   const preflight = await runPreflightChecks()
   if (!preflight.ok) {
@@ -342,14 +495,32 @@ export async function uninstallMacOSBridge() {
       ? `tmutil deletelocalsnapshots "${previousSnapshot.id}" || true; tmutil snapshot`
       : 'tmutil snapshot'
     : ''
+  const trustRemoval = removeTrustedCerts ? [
+    `USER_HOME="${userHome}"`,
+    'SYSTEM_KEYCHAIN="/Library/Keychains/System.keychain"',
+    'LOGIN_KEYCHAIN="$USER_HOME/Library/Keychains/login.keychain-db"',
+    'remove_certs() {',
+    '  keychain="$1"',
+    '  if [ -f "$keychain" ]; then',
+    '    for hash in $(security find-certificate -c "navis.local" -a -Z "$keychain" 2>/dev/null | awk \'/SHA-1/{print $3}\'); do',
+    '      security delete-certificate -Z "$hash" "$keychain" 2>/dev/null || true',
+    '    done',
+    '  fi',
+    '}',
+    'remove_certs "$SYSTEM_KEYCHAIN"',
+    'remove_certs "$LOGIN_KEYCHAIN"',
+  ].join('\n')
+    : 'true'
+
   const shellCommand = [
     'set -euo pipefail',
     snapshotBlock || 'true',
+    trustRemoval,
     `launchctl bootout system "${systemPlist}" >/dev/null 2>&1 || true`,
     `rm -f "${systemPlist}"`,
     // Restore original pf.conf if backup exists
     `if [ -f "${systemPfConfBackup}" ]; then mv "${systemPfConfBackup}" "${systemPfConf}"; fi`,
-  ].join('; ')
+  ].join('\n')
 
   await runMacOSAdminShell(shellCommand)
   await recordLatestSnapshot()
@@ -461,15 +632,21 @@ export async function installBridge(platformOverride = undefined) {
   throw new Error(`Unsupported platform for bridge installation: ${os}`)
 }
 
-export async function uninstallBridge(platformOverride = undefined) {
-  const os = platformOverride || process.platform
-  if (os === 'darwin') {
-    return uninstallMacOSBridge()
+export async function uninstallBridge(platformOverride = undefined, options = {}) {
+  let os = platformOverride
+  let resolvedOptions = options
+  if (typeof platformOverride === 'object' && platformOverride !== null) {
+    resolvedOptions = platformOverride
+    os = undefined
   }
-  if (os === 'linux') {
+  const platform = os || resolvedOptions.platformOverride || process.platform
+  if (platform === 'darwin') {
+    return uninstallMacOSBridge(resolvedOptions)
+  }
+  if (platform === 'linux') {
     return uninstallLinuxBridge()
   }
-  if (os === 'win32') {
+  if (platform === 'win32') {
     return uninstallWindowsBridge()
   }
   throw new Error(`Unsupported platform for bridge uninstallation: ${os}`)

@@ -16,7 +16,13 @@ Setup details: see `SETUP.md`.
 - No `sudo` during normal daily usage (`navisai up`).
 - Daemon is not a privileged process.
 - Works from phones and browsers on the same LAN.
-- **Zero conflict with development servers** on port 443.
+- **Zero conflict with development servers** on port 443; the bridge must never block an existing 443 listener owned by a dev tool (Refs: navisai-dool).
+
+### Recommendation Scope (Non-Negotiable)
+
+- All guidance must align to documented requirements in `docs/`.
+- If a suggestion is outside documented scope, explicitly label it as such and explain why it is being raised.
+- Never recommend changes to user development tools or services to resolve Navis conflicts.
 
 ---
 
@@ -41,6 +47,8 @@ Setup details: see `SETUP.md`.
   - REST API (see `IPC_TRANSPORT.md`)
   - WebSocket at `/ws`
 - Uses HTTPS + WSS with a certificate valid for `navis.local`.
+- TLS must be a local Navis CA + leaf chain with explicit DNS SANs (at minimum `navis.local`) and EKU `serverAuth`.
+- The daemon must serve the full chain (leaf + CA).
 - **Always accessible at the root origin** (`https://navis.local/`) - no subdirectory routing.
 
 ### 3.2 Navis Bridge (packet forwarding)
@@ -50,11 +58,12 @@ Setup details: see `SETUP.md`.
   - Traffic for `navis.local` → forwarded to daemon on `127.0.0.1:47621`
   - Traffic for all other domains → passes through to existing services
 - **Coexistence contract (dev-friendly)**:
-  - The bridge may redirect all `:443` traffic into a local transparent proxy for inspection.
-  - The proxy **MUST NOT** break other HTTPS services (e.g., ServBay).
-  - The proxy **MUST NOT** terminate TLS for non‑Navis domains; it must pass through bytes to the original destination so the client sees the original peer certificate.
-  - Only `navis.local` (and any explicitly configured Navis-owned domains) may be terminated/served by Navis.
-  - Refs: navisai-288, navisai-ms0
+- The bridge may redirect all `:443` traffic into a local transparent proxy for inspection.
+- The proxy **MUST NOT** break other HTTPS services (e.g., ServBay).
+- The proxy **MUST NOT** terminate TLS for non‑Navis domains; it must pass through bytes to the original destination so the client sees the original peer certificate.
+- Only `navis.local` (and any explicitly configured Navis-owned domains) may be terminated/served by Navis.
+- Refs: navisai-288, navisai-ms0
+- The bridge must confirm the alias IP is unused before binding; Navis should treat conflicting listeners as out-of-scope, keep searching for another unused alias (within reason), and fail with Navis-scoped remediation if none is available. It must not ask users to change unrelated development services (Refs: navisai-dool).
 - **Always available**: Navis is accessible at `https://navis.local` regardless of other services.
 - **Packet-level routing**:
   - macOS: pfctl with rdr rules based on Host header
@@ -82,6 +91,13 @@ Implementation note:
   - `https://navis.local/welcome` (Navis onboarding)
   - `https://navis.local/*` (all Navis API/UI paths)
   - `wss://navis.local/ws` (Navis WebSocket)
+
+**Mobile LAN reachability (common failure modes)**:
+- **Client isolation / guest network**: Many routers block mDNS or peer-to-peer traffic between Wi‑Fi clients. Disable client isolation or test on the main LAN SSID.
+- **mDNS filtering**: Some networks allow TCP but block UDP/5353 multicast. Use `dns-sd -B _services._dns-sd._udp local` on host and confirm the phone sees `navis.local` after setup.
+- **Split LANs**: Ensure phone and host are on the same subnet/VLAN.
+- If mobile cannot resolve `navis.local`, test LAN IP reachability to confirm bridge forwarding:
+  - `https://<LAN_IP>/status` (expect a cert warning; bypass to confirm connectivity)
 
 ---
 
@@ -117,7 +133,8 @@ Prohibited actions:
 - Installs packet forwarding rules for domain-based routing.
 - Enables mDNS advertisement for `navis.local`.
 - Generates/refreshes the `navis.local` certificate.
-- Detects existing port 443 usage but proceeds regardless (no conflicts).
+- Requires desktop trust for `navis.local` before setup completes and guides mobile trust before pairing.
+- Detects existing port 443 usage, selects an unused alias, and refuses setup if no safe Navis-owned binding is available.
 - Installs OS service for managing packet forwarding rules.
 - On macOS, installs `pf` anchor points into `/etc/pf.conf` (high-risk) so the `navisai/*` anchors are reachable by `pfctl` (Refs: navisai-7yr).
 - Requires a verified local APFS snapshot before mutating PF, mDNS, or TLS state.
@@ -156,8 +173,12 @@ If a non‑Navis local HTTPS service starts showing “Not secure” after setup
 - Navis must be “invisible” to those tools: no TLS MITM, no certificate generation for non‑Navis domains, and no breaking existing nginx routing (Refs: navisai-288, navisai-ms0).
 - macOS pf has a known limitation: traffic originating on the same machine can bypass `rdr` (localhost-origin) rules, so on-host requests to `https://navis.local` may land in the existing `:443` listener (e.g., ServBay’s default vhost) instead of Navis (Refs: navisai-5zu).
 - The long-term fix for true encapsulation is to give `navis.local` a dedicated IP (IP alias) and redirect only that IP, so other `:443` services are never intercepted at all (Refs: navisai-i3s).
+  - On macOS, the bridge also binds a local listener on the dedicated alias IP:443 and forwards to the transparent proxy so on-host `https://navis.local` works (Refs: navisai-8jps).
   - This dedicated IP is auto-chosen from the current LAN subnet and is **per-network** (it can change when you switch networks/SSIDs) (Refs: navisai-2bn).
+  - The bridge must detect alias conflicts (already-assigned IPs, wildcard `0.0.0.0:443` bindings) and select an unused alias IP before mutating pf rules; never hijack an active dev tool IP (Refs: navisai-bpqd, navisai-o52f).
+  - If no safe alias IP is available, setup must refuse to proceed and surface a remediation path (Refs: navisai-bpqd).
   - The bridge re-evaluates the alias on LAN changes and reloads pf rules to keep routing bound to the current subnet (Refs: navisai-2bn).
+  - Before binding the alias, the bridge must scan for any existing listener on the candidate alias IP:443 and reject it if another process already owns the port; Navis must choose another alias or refuse setup rather than changing or taking over the conflicting service (Refs: navisai-dool).
   - PF rules must live exclusively under the `navisai/*` anchors; never touch Apple default anchors.
   - PF rule installs must support a dry-run mode and require a snapshot before enabling.
 
@@ -173,6 +194,12 @@ sudo sysctl -w net.inet.ip.forwarding=1
 # This avoids intercepting outbound HTTPS traffic and avoids creating a loopback-only redirect.
 LAN_IP="192.168.1.71" # example; compute dynamically in setup
 echo "rdr pass inet proto tcp from any to ${LAN_IP} port 443 -> 127.0.0.1 port 8443" | sudo pfctl -a navisai/proxy -f -
+
+# Local access on macOS (on-host navis.local)
+# If a dedicated alias IP is reserved, bind a local listener on ALIAS_IP:443 and
+# forward to the transparent proxy (8443) so localhost-origin traffic works.
+# This listener must bind only to ALIAS_IP to avoid interfering with other 443 services.
+ALIAS_IP="192.168.1.162" # example alias; compute dynamically
 
 # The transparent proxy inspects TLS SNI and routes:
 # - navis.local → 127.0.0.1:47621 (NavisAI daemon)
@@ -201,6 +228,30 @@ netsh interface portproxy add v4tov4 listenport=443 listenaddress=0.0.0.0 connec
 ---
 
 ## 6. Optional “debug mode” (not the default)
+
+---
+
+## 7. Non-mutative mDNS Verification Runbook (Safe Diagnostics)
+
+Use these steps to verify mDNS health **without** changing system state. These are safe to run before setup
+and do not require a snapshot.
+
+1. Confirm mDNSResponder is running:
+   - `ps aux | grep mDNSResponder`
+   - `ps aux | grep mDNSResponderHelper`
+
+2. Verify DNS-SD responses:
+   - `dns-sd -Q _services._dns-sd._udp local`
+   - `dns-sd -B _services._dns-sd._udp local`
+
+3. Verify multicast reachability directly:
+   - `dig @224.0.0.251 -p 5353 _services._dns-sd._udp.local`
+
+4. Verify general resolver health:
+   - `dscacheutil -q host -a name apple.com`
+
+If any of the above fail, **do not** attempt mutative fixes without a fresh Navis snapshot and explicit
+user opt-in (see `docs/SECURITY.md`).
 
 For development/debugging, the daemon may optionally be reachable directly at:
 

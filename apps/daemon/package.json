@@ -48,7 +48,7 @@
     "ws": "^8.18.3"
   },
   "optionalDependencies": {
-    "@abandonware/bleno": "^0.5.1"
+    "@abandonware/bleno": "^0.6.2"
   },
   "devDependencies": {
     "@types/multicast-dns": "^7.2.4"

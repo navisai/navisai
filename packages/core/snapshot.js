@@ -6,7 +6,11 @@ import { promisify } from 'node:util'
 import { config } from './config.js'
 
 const execAsync = promisify(execCb)
-const SNAPSHOT_STATE_PATH = path.join(homedir(), '.navis', 'snapshot.json')
+function getNavisHome() {
+  return process.env.NAVIS_USER_HOME || process.env.NAVIS_HOME || homedir()
+}
+
+const SNAPSHOT_STATE_PATH = path.join(getNavisHome(), '.navis', 'snapshot.json')
 const TMUTIL_PREFIX = 'com.apple.TimeMachine.'
 
 function ensureDarwin() {
@@ -76,6 +80,10 @@ export function isSnapshotFresh(state) {
 export async function deleteNavisSnapshot(state) {
   ensureDarwin()
   if (!state?.id) return { deleted: false }
+  const snapshots = await listLocalSnapshots()
+  if (!snapshots.includes(state.id)) {
+    return { deleted: false, missing: true }
+  }
   await execAsync(tmutilCommand(`tmutil deletelocalsnapshots ${state.id}`))
   return { deleted: true }
 }

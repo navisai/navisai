@@ -89,12 +89,13 @@ Examples:
   - As defined in `PAIRING_PROTOCOL.md`.
 - `POST /pairing/start`  
   - Alias of pairing request for clients that prefer the “start” endpoint; see `PAIRING_PROTOCOL.md`.
-- `GET /certs/navis.local.crt`  
+- `GET /certs/navis.local-ca.crt`
   - Public certificate download endpoint to support mobile trust UX.
 
 - `POST /api/discovery/scan`  
   - Scan a directory for projects.
-  - Body: `{ path: string, options?: { depth?: number, includeHidden?: boolean } }`
+  - Body: `{ path?: string, options?: { depth?: number, includeHidden?: boolean } }`
+  - When `path` is omitted or blank, scans the daemon user's home directory.
   - Requires auth.
   - Returns: `{ scannedPath: string, count: number, projects: Project[] }`
 

@@ -22,7 +22,7 @@ import { join } from 'node:path'
 import multicastDns from 'multicast-dns'
 import { TransparentHTTPSProxy } from './transparent-proxy.js'
 import { runPreflightChecks } from '@navisai/core/preflight'
-import { refreshNavisSnapshot, readSnapshotState, isSnapshotFresh, navisSnapshotExists } from '@navisai/core/snapshot'
+import { readSnapshotState, isSnapshotFresh, navisSnapshotExists } from '@navisai/core/snapshot'
 
 const listenPort = 443
 const targetHost = '127.0.0.1'
@@ -30,6 +30,19 @@ const targetPort = 47621
 const targetDomain = 'navis.local'
 const mdnsServiceType = '_navisai._tcp.local'
 const mdnsServiceInstance = 'NavisAI._navisai._tcp.local'
+
+const isRootUser = typeof process.getuid === 'function' && process.getuid() === 0
+
+function normalizePrivilegedCommand(command) {
+  if (isRootUser) {
+    return command.replace(/\bsudo\s+-n\s+/g, '').replace(/\bsudo\s+/g, '')
+  }
+  return command
+}
+
+function execPrivileged(command, options) {
+  return execSync(normalizePrivilegedCommand(command), options)
+}
 
 function isSetupApproved() {
   return process.argv.includes('--setup-approved') || process.env.NAVIS_SETUP_APPROVED === '1'
@@ -48,6 +61,16 @@ class PacketForwardingBridge {
     this.navisAliasIp = null
     this.navisAliasInterface = null
     this.ipMonitorInterval = null
+    this.aliasRetryInterval = null
+    this.aliasRetryMs = 20000
+    this.aliasUnavailableWarned = false
+    this.wildcard443ConflictWarned = false
+    this.aliasPortConflictWarned = false
+    this.aliasConflictRetryCount = 0
+    this.aliasConflictRetryThreshold = 6
+    this.aliasListenerDisabled = false
+    this.aliasListenerReason = null
+    this.lastAliasFailure = null
     this.transparentProxy = new TransparentHTTPSProxy({
       proxyPort: 8443,
       daemonHost: targetHost,
@@ -121,48 +144,331 @@ class PacketForwardingBridge {
       candidates.push(this.intToIp(candidate))
     }
 
+    for (let i = candidates.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1))
+      const temp = candidates[i]
+      candidates[i] = candidates[j]
+      candidates[j] = temp
+    }
+
     return candidates
+  }
+
+  isAliasIpInUse(candidate) {
+    try {
+      execSync(`ping -c 1 -W 1000 ${candidate} >/dev/null 2>&1`)
+      return true
+    } catch {
+      // No response; continue.
+    }
+
+    try {
+      execSync('command -v arping >/dev/null 2>&1')
+      execSync(`arping -c 1 -w 1000 ${candidate} >/dev/null 2>&1`)
+      return true
+    } catch {
+      // arping unavailable or no response.
+    }
+
+    return false
+  }
+
+  verifyAliasRoute(interfaceName, aliasIp) {
+    try {
+      const output = execSync(`route -n get ${aliasIp} 2>/dev/null || true`, { encoding: 'utf8' })
+      const match = output.match(/interface:\s*(\S+)/)
+      return match ? match[1] === interfaceName : false
+    } catch {
+      return false
+    }
   }
 
   async releaseNavisAliasIp() {
     if (!this.navisAliasIp || !this.navisAliasInterface) return
     try {
-      execSync(`sudo ifconfig ${this.navisAliasInterface} -alias ${this.navisAliasIp} || true`, { stdio: 'pipe' })
+      execPrivileged(`sudo ifconfig ${this.navisAliasInterface} -alias ${this.navisAliasIp} || true`, { stdio: 'pipe' })
       console.log(`🧹 Released navis.local alias: ${this.navisAliasIp} (${this.navisAliasInterface})`)
     } catch {
       // Ignore cleanup errors.
     } finally {
       this.navisAliasIp = null
       this.navisAliasInterface = null
+      this.aliasListenerDisabled = false
+      this.aliasListenerReason = null
+      this.aliasConflictRetryCount = 0
     }
   }
 
   async ensureNavisAliasIp(lanOverride = null) {
+    this.lastAliasFailure = null
     if (this.platform !== 'darwin') return null
 
     const lan = lanOverride || this.getLanInterfaceIPv4()
-    if (!lan) return null
+    if (!lan) {
+      this.lastAliasFailure = 'no-lan-interface'
+      return null
+    }
 
     this.lanInterface = lan.name
     this.lanIp = lan.ip
     this.lanNetmask = lan.netmask
 
+    if (this.navisAliasIp && this.navisAliasInterface === lan.name) {
+      return this.navisAliasIp
+    }
+
+    const wildcardConflict = this.hasWildcard443Conflict()
+    const failureStats = {
+      attempted: 0,
+      inUse: 0,
+      routeFailed: 0,
+      bindInUse: 0,
+      bindOther: 0,
+      execFailed: 0
+    }
+
     const candidates = this.getAliasCandidates(lan)
     for (const candidate of candidates) {
+      failureStats.attempted += 1
+      if (this.isAliasIpInUse(candidate)) {
+        failureStats.inUse += 1
+        continue
+      }
       try {
-        execSync(`sudo ifconfig ${lan.name} alias ${candidate} ${lan.netmask}`, { stdio: 'pipe' })
+        execPrivileged(`sudo ifconfig ${lan.name} alias ${candidate} ${lan.netmask}`, { stdio: 'pipe' })
+        if (!this.verifyAliasRoute(lan.name, candidate)) {
+          failureStats.routeFailed += 1
+          execPrivileged(`sudo ifconfig ${lan.name} -alias ${candidate} || true`, { stdio: 'pipe' })
+          continue
+        }
+        if (this.transparentProxy) {
+          const bindResult = await this.transparentProxy.canBindPort(candidate, listenPort)
+          if (!bindResult.available) {
+            if (bindResult.errorCode === 'EADDRINUSE') {
+              failureStats.bindInUse += 1
+              await this.warnWildcard443ConflictOnce()
+              if (wildcardConflict) {
+                this.navisAliasIp = candidate
+                this.navisAliasInterface = lan.name
+                this.aliasListenerDisabled = true
+                this.aliasListenerReason = 'wildcard-443'
+                this.cleanupCommands.push(`sudo ifconfig ${lan.name} -alias ${candidate} || true`)
+                console.log(
+                  `✅ Reserved dedicated IP for navis.local: ${candidate} (${lan.name}) (alias listener disabled due to wildcard 443)`
+                )
+                return candidate
+              }
+              execPrivileged(`sudo ifconfig ${lan.name} -alias ${candidate} || true`, { stdio: 'pipe' })
+              console.log(`⚠️  Alias ${candidate}:443 already in use; selecting another`)
+            } else {
+              failureStats.bindOther += 1
+              execPrivileged(`sudo ifconfig ${lan.name} -alias ${candidate} || true`, { stdio: 'pipe' })
+              console.log(`⚠️  Alias ${candidate}:443 unavailable (${bindResult.errorCode}); selecting another`)
+            }
+            continue
+          }
+        }
         this.navisAliasIp = candidate
         this.navisAliasInterface = lan.name
+        this.wildcard443ConflictWarned = false
+        this.aliasListenerDisabled = false
+        this.aliasListenerReason = null
+        this.aliasConflictRetryCount = 0
         this.cleanupCommands.push(`sudo ifconfig ${lan.name} -alias ${candidate} || true`)
+        try {
+          execPrivileged(`sudo route -n add -host ${candidate} -iface lo0 2>/dev/null || true`, { stdio: 'pipe' })
+          this.cleanupCommands.push(`sudo route -n delete -host ${candidate} -iface lo0 2>/dev/null || true`)
+          console.log(`✅ Added loopback route for navis.local alias: ${candidate}`)
+        } catch {
+          // Ignore route errors; alias may still be reachable on LAN.
+        }
         console.log(`✅ Reserved dedicated IP for navis.local: ${candidate} (${lan.name})`)
         return candidate
       } catch {
+        failureStats.execFailed += 1
         // Try next candidate.
       }
     }
 
-    console.log('⚠️  Unable to reserve a dedicated IP alias for navis.local; continuing with primary LAN IP')
+    this.lastAliasFailure =
+      `attempted=${failureStats.attempted}, ` +
+      `inUse=${failureStats.inUse}, ` +
+      `routeFailed=${failureStats.routeFailed}, ` +
+      `bindInUse=${failureStats.bindInUse}, ` +
+      `bindOther=${failureStats.bindOther}, ` +
+      `execFailed=${failureStats.execFailed}`
+    if (failureStats.bindInUse > 0) {
+      this.aliasListenerReason = 'port-conflict'
+      this.handleAliasConflictRetry(failureStats)
+      console.log('⚠️  Alias candidates remain blocked by another 443 listener; continuing to search without interrupting other tools.')
+    } else {
+      this.aliasListenerReason = 'no-alias'
+      console.log('⚠️  Unable to reserve a dedicated IP alias for navis.local; continuing with primary LAN IP')
+    }
+    console.log(`ℹ️  Alias reservation summary: ${this.lastAliasFailure}`)
     return null
+  }
+
+  async warnWildcard443ConflictOnce() {
+    if (this.wildcard443ConflictWarned || this.aliasPortConflictWarned) return
+    const listeners = this.getPortListeners(listenPort)
+    if (!listeners || listeners.length === 0) return
+
+    const sample = listeners.slice(0, 3).join(' | ')
+    const hasWildcard = listeners.some((line) => /\*:443\b/.test(line) || /0\.0\.0\.0:443\b/.test(line))
+
+    if (hasWildcard) {
+      console.log(
+        '⚠️  Port 443 is already bound on 0.0.0.0 (wildcard). ' +
+          'The dedicated alias listener for on-host navis.local is disabled, but LAN routing still works. ' +
+          'Stop the wildcard service only if you need on-host navis.local without relying on pf redirect.'
+      )
+      console.log(`ℹ️  443 listeners (sample): ${sample}`)
+      this.wildcard443ConflictWarned = true
+      this.aliasPortConflictWarned = true
+      return
+    }
+
+    console.log(`ℹ️  443 listeners detected (sample): ${sample}`)
+    this.aliasPortConflictWarned = true
+  }
+
+  handleAliasConflictRetry(failureStats) {
+    if (failureStats.bindInUse === 0) return
+    this.aliasConflictRetryCount += 1
+    if (this.aliasConflictRetryCount < this.aliasConflictRetryThreshold) {
+      console.log(
+        `ℹ️  Alias collision detected (${this.aliasConflictRetryCount}/${this.aliasConflictRetryThreshold}); continuing to scan for another safe alias.`
+      )
+    } else {
+      console.log(
+        '⚠️  navis.local alias still blocked after repeated attempts; continuing to scan but please stop the conflicting 443 service if you need the dedicated alias listener.'
+      )
+    }
+  }
+
+  getPortListeners(port) {
+    try {
+      const output = execSync(`/usr/sbin/lsof -nP -iTCP:${port} -sTCP:LISTEN 2>/dev/null || true`, {
+        encoding: 'utf8'
+      }).trim()
+      if (!output) return null
+      return output.split('\n').slice(1).filter(Boolean)
+    } catch {
+      return null
+    }
+  }
+
+  hasWildcard443Conflict() {
+    if (this.wildcard443ConflictWarned) return true
+    const listeners = this.getPortListeners(listenPort)
+    if (!listeners || listeners.length === 0) return false
+
+    const hasWildcard = listeners.some((line) => /\*:443\b/.test(line) || /0\.0\.0\.0:443\b/.test(line))
+    if (!hasWildcard) return false
+
+    const sample = listeners.slice(0, 3).join(' | ')
+    console.log(
+      '⚠️  Port 443 is already bound on 0.0.0.0 (wildcard). ' +
+        'The dedicated alias listener for on-host navis.local is disabled, but LAN routing still works. ' +
+        'Stop the wildcard service only if you need on-host navis.local without relying on pf redirect.'
+    )
+    console.log(`ℹ️  443 listeners (sample): ${sample}`)
+    this.wildcard443ConflictWarned = true
+    this.aliasPortConflictWarned = true
+    return true
+  }
+
+  scheduleAliasRetry() {
+    if (this.aliasRetryInterval) return
+    this.aliasRetryInterval = setInterval(() => {
+      this.tryEnableMacosRouting().catch(() => {})
+    }, this.aliasRetryMs)
+  }
+
+  clearAliasRetry() {
+    if (!this.aliasRetryInterval) return
+    clearInterval(this.aliasRetryInterval)
+    this.aliasRetryInterval = null
+  }
+
+  async disableMacosRouting() {
+    if (this.transparentProxy) {
+      await this.transparentProxy.stopAliasListener()
+      await this.transparentProxy.stop()
+    }
+    this.stopMDNS()
+  }
+
+  async tryEnableMacosRouting() {
+    if (this.platform !== 'darwin') return false
+    const aliasIp = await this.ensureNavisAliasIp()
+    if (!aliasIp) {
+      await this.disableMacosRouting()
+      if (!this.aliasUnavailableWarned) {
+        console.log('⚠️  navis.local inactive: no safe alias IP available; avoiding conflicts with local 443 services')
+      }
+      this.aliasUnavailableWarned = true
+      this.scheduleAliasRetry()
+      return false
+    }
+
+    this.aliasUnavailableWarned = false
+    this.clearAliasRetry()
+
+    this.transparentProxy.setRedirectIps([aliasIp])
+    if (this.lanIp) {
+      this.transparentProxy.setPassthroughHost(this.lanIp)
+    }
+    this.transparentProxy.setEnableLoopbackRdr(true)
+
+    console.log('🔧 Starting transparent HTTPS proxy...')
+    await this.transparentProxy.start()
+    this.logPfRuleStatus()
+    await this.startAliasListener()
+    await this.startMDNS()
+
+    return true
+  }
+
+  logPfRuleStatus() {
+    if (this.platform !== 'darwin') return
+    try {
+      const natRules = execSync('pfctl -a navisai/proxy -s nat 2>/dev/null || true', {
+        encoding: 'utf8'
+      }).trim()
+      const filterRules = execSync('pfctl -a navisai/filter -s rules 2>/dev/null || true', {
+        encoding: 'utf8'
+      }).trim()
+      if (!natRules) {
+        console.log('⚠️  pf NAT rules not visible in navisai/proxy anchor')
+      } else {
+        console.log('✅ pf NAT rules active')
+      }
+      if (!filterRules) {
+        console.log('⚠️  pf filter rules not visible in navisai/filter anchor')
+      } else {
+        console.log('✅ pf filter rules active')
+      }
+    } catch {
+      console.log('⚠️  pf rule status check failed')
+    }
+  }
+
+  async startAliasListener() {
+    if (this.platform !== 'darwin') return
+    if (!this.navisAliasIp) return
+    if (!this.transparentProxy) return
+    if (this.aliasListenerDisabled) {
+      const reason = this.aliasListenerReason || 'disabled'
+      console.log(`⚠️  Alias listener disabled (${reason}); relying on pf redirect only`)
+      return
+    }
+
+    const started = await this.transparentProxy.startAliasListener(this.navisAliasIp)
+    if (!started) {
+      console.log(`⚠️  Alias listener inactive for ${this.navisAliasIp}:443`)
+    }
   }
 
   async start() {
@@ -189,7 +495,13 @@ class PacketForwardingBridge {
         const exists = await navisSnapshotExists(snapshotState)
         const fresh = isSnapshotFresh(snapshotState)
         if (!exists || !fresh) {
-          await refreshNavisSnapshot()
+          console.error('❌ Snapshot gate blocked: Navis snapshot missing or stale.')
+          if (snapshotState?.id) {
+            console.error(`   Last recorded snapshot: ${snapshotState.id}`)
+          }
+          console.error('   Run: navisai setup (or the setup app) to create a fresh snapshot before mutations.')
+          this.keepAlive()
+          return
         }
       }
 
@@ -201,33 +513,28 @@ class PacketForwardingBridge {
       // Enable packet forwarding in kernel if needed
       await this.enablePacketForwarding()
 
-      // On macOS, reserve a dedicated IP alias so Navis never fights other :443 tools.
-      const aliasIp = await this.ensureNavisAliasIp()
-      if (aliasIp) {
-        this.transparentProxy.setRedirectIps([aliasIp])
-        if (this.lanIp) {
-          this.transparentProxy.setPassthroughHost(this.lanIp)
+      if (this.platform === 'darwin') {
+        const routingEnabled = await this.tryEnableMacosRouting()
+        if (!routingEnabled) {
+          this.keepAlive()
+          return
         }
-        this.transparentProxy.setEnableLoopbackRdr(true)
-      }
+      } else {
+        // Start transparent HTTPS proxy for domain-based routing
+        console.log('🔧 Starting transparent HTTPS proxy...')
+        await this.transparentProxy.start()
 
-      // Start transparent HTTPS proxy for domain-based routing
-      console.log('🔧 Starting transparent HTTPS proxy...')
-      await this.transparentProxy.start()
-
-      // Install platform-specific forwarding rules
-      switch (this.platform) {
-        case 'darwin':
-          await this.setupMacOS()
-          break
-        case 'linux':
-          await this.setupLinux()
-          break
-        case 'win32':
-          await this.setupWindows()
-          break
-        default:
-          throw new Error(`Unsupported platform: ${this.platform}`)
+        // Install platform-specific forwarding rules
+        switch (this.platform) {
+          case 'linux':
+            await this.setupLinux()
+            break
+          case 'win32':
+            await this.setupWindows()
+            break
+          default:
+            throw new Error(`Unsupported platform: ${this.platform}`)
+        }
       }
 
       this.isRunning = true
@@ -248,8 +555,10 @@ class PacketForwardingBridge {
         }, 2000) // Wait a moment for detection
       }
 
-      // Start mDNS service for name resolution
-      await this.startMDNS()
+      if (this.platform !== 'darwin') {
+        // Start mDNS service for name resolution
+        await this.startMDNS()
+      }
 
       // Keep process alive
       this.keepAlive()
@@ -275,6 +584,14 @@ class PacketForwardingBridge {
 
   async startMDNS() {
     try {
+      if (this.platform === 'darwin' && !this.navisAliasIp) {
+        console.log('⚠️  mDNS not started: no safe alias IP for navis.local')
+        if (this.lastAliasFailure) {
+          console.log(`ℹ️  Alias reservation summary: ${this.lastAliasFailure}`)
+        }
+        return
+      }
+      if (this.mdns) return
       const ip = this.navisAliasIp || this.getLanAddress()
       const ipv6 = this.getLanInterfaceIPv6()
       if (!ip) {
@@ -351,8 +668,13 @@ class PacketForwardingBridge {
               this.transparentProxy.setRedirectIps([aliasIp])
               this.transparentProxy.setEnableLoopbackRdr(true)
             } else {
-              this.transparentProxy.setRedirectIps(null)
-              this.transparentProxy.setEnableLoopbackRdr(false)
+              await this.disableMacosRouting()
+              if (!this.aliasUnavailableWarned) {
+                console.log('⚠️  navis.local inactive: no safe alias IP available after LAN change')
+              }
+              this.aliasUnavailableWarned = true
+              this.scheduleAliasRetry()
+              return
             }
 
             if (this.lanIp) {
@@ -360,6 +682,7 @@ class PacketForwardingBridge {
             }
 
             await this.transparentProxy.reloadPfRules()
+            await this.startAliasListener()
           }
         }
 
@@ -391,12 +714,12 @@ class PacketForwardingBridge {
     try {
       if (this.platform === 'darwin') {
         // Enable IP forwarding on macOS
-        execSync('sudo sysctl -w net.inet.ip.forwarding=1', { stdio: 'inherit' })
+        execPrivileged('sudo sysctl -w net.inet.ip.forwarding=1', { stdio: 'inherit' })
         this.cleanupCommands.push('sudo sysctl -w net.inet.ip.forwarding=0')
         console.log('✅ Enabled IP forwarding')
       } else if (this.platform === 'linux') {
         // Enable IP forwarding on Linux
-        execSync('sudo sysctl -w net.ipv4.ip_forward=1', { stdio: 'inherit' })
+        execPrivileged('sudo sysctl -w net.ipv4.ip_forward=1', { stdio: 'inherit' })
         this.cleanupCommands.push('sudo sysctl -w net.ipv4.ip_forward=0')
         console.log('✅ Enabled IP forwarding')
       }
@@ -470,12 +793,13 @@ class PacketForwardingBridge {
 
     // Stop transparent proxy
     if (this.transparentProxy) {
+      await this.transparentProxy.stopAliasListener()
       await this.transparentProxy.stop()
     }
 
     for (const command of this.cleanupCommands.reverse()) {
       try {
-        execSync(command, { stdio: 'pipe' })
+        execPrivileged(command, { stdio: 'pipe' })
       } catch (error) {
         // Ignore cleanup errors - rules might not exist
         console.warn(`Warning: ${error.message}`)
@@ -520,13 +844,13 @@ class PacketForwardingBridge {
 
       // Check packet forwarding status
       if (this.platform === 'darwin') {
-        const proxyNat = execSync('sudo pfctl -a navisai/proxy -s nat 2>/dev/null || true', { encoding: 'utf8' })
-        const filterRules = execSync('sudo pfctl -a navisai/filter -s rules 2>/dev/null || true', { encoding: 'utf8' })
+        const proxyNat = execPrivileged('sudo pfctl -a navisai/proxy -s nat 2>/dev/null || true', { encoding: 'utf8' })
+        const filterRules = execPrivileged('sudo pfctl -a navisai/filter -s rules 2>/dev/null || true', { encoding: 'utf8' })
         packetForwardingActive =
           (proxyNat.includes('rdr') && proxyNat.includes('8443')) ||
           filterRules.includes('keep state')
       } else if (this.platform === 'linux') {
-        const output = execSync('sudo iptables -t nat -L PREROUTING -n -v', { encoding: 'utf8' })
+        const output = execPrivileged('sudo iptables -t nat -L PREROUTING -n -v', { encoding: 'utf8' })
         packetForwardingActive = output.includes(targetDomain) || output.includes(`${targetPort}`)
       } else if (this.platform === 'win32') {
         const output = execSync('netsh interface portproxy show all', { encoding: 'utf8' })
@@ -539,13 +863,19 @@ class PacketForwardingBridge {
       return {
         packetForwarding: packetForwardingActive,
         mdns: mDNSActive,
-        active: packetForwardingActive && mDNSActive
+        active: packetForwardingActive && mDNSActive,
+        aliasIp: this.navisAliasIp,
+        aliasListenerDisabled: this.aliasListenerDisabled,
+        aliasFailure: this.lastAliasFailure
       }
     } catch (error) {
       return {
         packetForwarding: false,
         mdns: false,
-        active: false
+        active: false,
+        aliasIp: this.navisAliasIp,
+        aliasListenerDisabled: this.aliasListenerDisabled,
+        aliasFailure: this.lastAliasFailure
       }
     }
   }

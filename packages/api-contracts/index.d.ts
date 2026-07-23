@@ -5,7 +5,7 @@ export const NAVIS_PATHS: {
   status: '/status'
   ws: '/ws'
   certs: {
-    navisLocalCrt: '/certs/navis.local.crt'
+    navisLocalCrt: '/certs/navis.local-ca.crt'
   }
   pairing: {
     request: '/pairing/request'

@@ -77,6 +77,20 @@ rdr pass inet proto tcp from any to any port 443 -> 127.0.0.1 port 8443
 pass out quick inet proto tcp from 127.0.0.1 to any port 443 keep state
 ```
 
+### 1.1 On-Host Alias Listener (macOS)
+
+macOS does not reliably apply `rdr` rules to localhost-originated traffic. When a
+dedicated alias IP is reserved, Navis binds a listener directly on that alias
+IP:443 and forwards traffic to the transparent proxy (127.0.0.1:8443). This keeps
+LAN behavior unchanged and makes on-host `https://navis.local` work without
+intercepting other local 443 services.
+
+Guardrails:
+- Bind only to the alias IP (never 0.0.0.0).
+- Start only after proxy is listening on 8443.
+- If bind or health check fails, disable the listener and proceed with LAN-only routing.
+- Stop the listener before releasing the alias IP on cleanup.
+
 ### 2. Transparent HTTPS Proxy Core
 
 ```javascript

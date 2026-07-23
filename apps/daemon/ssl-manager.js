@@ -3,7 +3,7 @@
  * Handles SSL certificate generation and management
  */
 
-import { readFile, writeFile, access, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, access, mkdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -13,6 +13,8 @@ export class SSLManager {
     this.certsDir = join(this.dataDir, 'certs')
 
     // Canonical locations (docs/SETUP.md)
+    this.caKeyFile = join(this.certsDir, 'navis.local-ca.key')
+    this.caCertFile = join(this.certsDir, 'navis.local-ca.crt')
     this.keyFile = join(this.certsDir, 'navis.local.key')
     this.certFile = join(this.certsDir, 'navis.local.crt')
 
@@ -29,8 +31,19 @@ export class SSLManager {
       // Migrate legacy certs if present
       const legacyKeyExists = await this.fileExists(this.legacyKeyFile)
       const legacyCertExists = await this.fileExists(this.legacyCertFile)
+      const caKeyExists = await this.fileExists(this.caKeyFile)
+      const caCertExists = await this.fileExists(this.caCertFile)
       const keyExists = await this.fileExists(this.keyFile)
       const certExists = await this.fileExists(this.certFile)
+
+      if ((caKeyExists && !caCertExists) || (!caKeyExists && caCertExists)) {
+        console.warn('⚠️  SSL CA material is incomplete, regenerating...')
+        await this.clearLegacyCertificates()
+      }
+      if ((keyExists && !certExists) || (!keyExists && certExists)) {
+        console.warn('⚠️  SSL leaf material is incomplete, regenerating...')
+        await this.clearLegacyCertificates()
+      }
 
       if (!keyExists && !certExists && legacyKeyExists && legacyCertExists) {
         const legacyKey = await readFile(this.legacyKeyFile)
@@ -40,7 +53,7 @@ export class SSLManager {
       }
 
       // Check if certificates already exist
-      if (keyExists && certExists) {
+      if (caKeyExists && caCertExists && keyExists && certExists) {
         console.log('📜 SSL certificates found')
         return
       }
@@ -55,50 +68,46 @@ export class SSLManager {
   }
 
   async generateCertificates() {
-    try {
-      // Try using selfsigned module first
-      const { selfSigned } = await import('selfsigned')
-
-      const attrs = [
-        { name: 'commonName', value: 'navis.local' },
-        { name: 'countryName', value: 'US' },
-        { name: 'localityName', value: 'San Francisco' },
-        { name: 'organizationName', value: 'NavisAI' },
-        { name: 'organizationUnitName', value: 'Development' }
-      ]
-
-      const pems = selfSigned.generate(attrs, {
-        days: 365,
-        keySize: 2048,
-        algorithm: 'sha256',
-        extensions: [
-          {
-            name: 'subjectAltName',
-            altNames: [
-              { type: 2, value: 'navis.local' },
-              { type: 2, value: 'localhost' },
-              { type: 7, ip: '127.0.0.1' },
-              { type: 7, ip: '::1' }
-            ]
-          }
-        ]
-      })
-
-      await writeFile(this.keyFile, pems.private)
-      await writeFile(this.certFile, pems.cert)
-
-      console.log('✅ SSL certificates generated with selfsigned')
-    } catch (error) {
-      console.log('⚠️  selfsigned module not available, falling back to openssl...')
-      await this.generateWithOpenSSL()
-    }
+    await this.generateWithOpenSSL()
   }
 
   async generateWithOpenSSL() {
     const { execSync } = await import('node:child_process')
 
     try {
-      // Generate private key
+      const caKeyExists = await this.fileExists(this.caKeyFile)
+      const caCertExists = await this.fileExists(this.caCertFile)
+
+      if (!caKeyExists || !caCertExists) {
+        // Generate CA key and certificate
+        execSync(`openssl genrsa -out "${this.caKeyFile}" 4096`, { stdio: 'ignore' })
+
+        const caConfig = `
+[req]
+distinguished_name = ca_dn
+prompt = no
+
+[ca_dn]
+CN = NavisAI Local Development CA
+O = NavisAI
+OU = Local Development
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical, keyCertSign, cRLSign
+subjectKeyIdentifier = hash
+`
+
+        const caConfigFile = join(this.dataDir, 'openssl-ca.cnf')
+        await writeFile(caConfigFile, caConfig)
+
+        execSync(
+          `openssl req -x509 -new -nodes -key "${this.caKeyFile}" -sha256 -days 3650 -out "${this.caCertFile}" -config "${caConfigFile}" -extensions v3_ca`,
+          { stdio: 'ignore' }
+        )
+      }
+
+      // Generate leaf key
       execSync(`openssl genrsa -out "${this.keyFile}" 2048`, { stdio: 'ignore' })
 
       // Generate certificate signing request
@@ -111,9 +120,13 @@ prompt = no
 
 [req_distinguished_name]
 CN = navis.local
+O = NavisAI
+OU = Development
 
 [v3_req]
 subjectAltName = @alt_names
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
 
 [alt_names]
 DNS.1 = navis.local
@@ -127,10 +140,13 @@ IP.2 = ::1
 
       execSync(`openssl req -new -key "${this.keyFile}" -out "${csrFile}" -config "${configFile}"`, { stdio: 'ignore' })
 
-      // Generate self-signed certificate
-      execSync(`openssl x509 -req -days 365 -in "${csrFile}" -signkey "${this.keyFile}" -out "${this.certFile}" -extensions v3_req -extfile "${configFile}"`, { stdio: 'ignore' })
+      // Generate leaf certificate signed by CA
+      execSync(
+        `openssl x509 -req -days 365 -in "${csrFile}" -CA "${this.caCertFile}" -CAkey "${this.caKeyFile}" -CAcreateserial -out "${this.certFile}" -extensions v3_req -extfile "${configFile}"`,
+        { stdio: 'ignore' }
+      )
 
-      console.log('✅ SSL certificates generated with openssl')
+      console.log('✅ SSL certificates generated with openssl (CA + leaf)')
     } catch (error) {
       throw new Error(`Failed to generate SSL certificates: ${error.message}`)
     }
@@ -139,8 +155,13 @@ IP.2 = ::1
   async getSSLOptions() {
     const key = await readFile(this.keyFile)
     const cert = await readFile(this.certFile)
+    const caCert = await readFile(this.caCertFile)
 
-    return { key, cert }
+    return { key, cert: Buffer.concat([cert, caCert]) }
+  }
+
+  async getCACertificate() {
+    return await readFile(this.caCertFile)
   }
 
   async fileExists(filePath) {
@@ -150,5 +171,27 @@ IP.2 = ::1
     } catch {
       return false
     }
+  }
+
+  async clearLegacyCertificates() {
+    const candidates = [
+      this.caKeyFile,
+      this.caCertFile,
+      this.keyFile,
+      this.certFile,
+      this.legacyKeyFile,
+      this.legacyCertFile,
+      join(this.dataDir, 'navis.csr'),
+      join(this.dataDir, 'openssl.cnf'),
+      join(this.dataDir, 'openssl-ca.cnf'),
+      join(this.dataDir, 'navis.local-ca.srl'),
+    ]
+    await Promise.all(candidates.map(async (file) => {
+      try {
+        await unlink(file)
+      } catch {
+        // Ignore missing files.
+      }
+    }))
   }
 }
