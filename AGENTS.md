@@ -37,7 +37,7 @@ If a conflict exists, **this file overrides Global AGENTS.md** for this reposito
 ## 🚀 Agent Quick Start (First 3 Commands)
 
 ```bash
-cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
+cd /path/to/navisai
 bd quickstart   # Load project context
 pnpm beads:ready # Find work to do (pins project DB)
 bd create "Task" -t task -d "Details"  # Create new issue
@@ -131,7 +131,7 @@ All agents must run `pnpm verify` before committing. Install persistent hooks wi
 
 ### Quick Start (3 Commands)
 ```bash
-cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
+cd /path/to/navisai
 bd quickstart    # Load project context
 bd ready    # Find work to do
 bd create "Brief task description" -t task -d "Details"  # Create new issue
@@ -163,7 +163,7 @@ pnpm beads:status
 
 **Daily Onboarding (Every Session)**:
 ```bash
-cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
+cd /path/to/navisai
 bd quickstart  # Quick start guide for bd
 bd ready  # See available work
 ```

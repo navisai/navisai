@@ -90,6 +90,11 @@ Beads provides persistent agent memory and task tracking for NavisAI's complex, 
 - Security/auth → `docs/SECURITY.md` + `docs/AUTH_MODEL.md`
 - Architecture → `docs/ARCHITECTURE.md`
 
+**Recommendation Scope (Required)**:
+- Do not suggest actions outside documented scope.
+- If a suggestion is outside documented scope, explicitly label it and explain why.
+- Never recommend changes to user development tools or services to resolve Navis conflicts.
+
 **Example Issue Creation**:
 ```bash
 bd create "Implement intelligent reverse proxy per NETWORKING.md v0.2" \
@@ -97,6 +102,9 @@ bd create "Implement intelligent reverse proxy per NETWORKING.md v0.2" \
   -l bridge,networking \
   -d "📋 Governing Documentation: docs/NETWORKING.md v0.2"
 ```
+
+**Reporting Rule**:
+- When reporting Beads status in updates, always include a short human summary plus the Beads ID (never ID-only).
 
 ### 3.3 Dependency Management
 

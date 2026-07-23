@@ -6,8 +6,8 @@ This guide explains how agents should use Beads for task tracking, coordination,
 
 ### 1. Initialize Your Session
 ```bash
-# Always start your session with:
-cd /Volumes/Macintosh\ HD/Users/vsmith/navisai
+# Always start your session from the repository root:
+cd /path/to/navisai
 bd quickstart  # Load project context and recommended workflows
 ```
 
@@ -90,6 +90,11 @@ ALL Beads issues MUST reference governing documentation:
 - **Setup/UX changes** → `docs/SETUP.md` + `docs/ONBOARDING_FLOW.md`
 - **Security/auth** → `docs/SECURITY.md` + `docs/AUTH_MODEL.md`
 - **Beads workflow** → `docs/BEADS_WORKFLOW.md`
+
+### Recommendation Scope (Required)
+- Do not suggest actions outside documented scope.
+- If a suggestion is outside documented scope, explicitly label it and explain why.
+- Never recommend changes to user development tools or services to resolve Navis conflicts.
 
 ### Required Labels
 Add NavisAI-specific labels (these are organized by convention):
@@ -219,8 +224,8 @@ npm install -g beads
 
 ### Issues not showing
 ```bash
-# Check you're in the right directory
-pwd  # Should be /Volumes/Macintosh HD/Users/vsmith/navisai
+# Check you're at the NavisAI repository root
+pwd
 
 # Check Beads database exists
 ls -la .beads/
